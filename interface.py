@@ -1,121 +1,92 @@
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackData import *
-import pygame
+from trackObservations import *
+
 import sys
 import threading
 import time
 import numpy as np
 import os
-#import agent
+import agent
 
+human = False
 
-global interface_state
-global agent_state
-interface_state = None
-
-
-os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10, 50)
-
-    
-class VehicleDataInputs:
-    def __init__(self, speed, acceleration, turning_rate, lateral_velocity, distance_to_centerline, angle_to_centerline, next_curve_distance, next_curve_direction):
-        self.speed = speed
-        self.acceleration = acceleration
-        self.turning_rate = turning_rate
-        self.lateral_velocity = lateral_velocity
-        self.distance_to_centerline = distance_to_centerline #lateral disstance to centerline
-        self.angle_to_centerline = angle_to_centerline
-        self.next_curve_distance = next_curve_distance #distance to center of turning block
-        self.next_curve_direction = next_curve_direction #1 = right, 0 = left
-
-        
 class MainClient(Client):
     def __init__(self) -> None:
         super(MainClient, self).__init__()
+        self.prevSpeed = 0
+        self.prevDistance = 0
+        self.expObject = None #expObject = list [state, action it took, reward for action, new state, done]
+        self.record = 0
 
     def on_registered(self, iface: TMInterface) -> None:
         print(f'Registered to {iface.server_name}')
 
+    def get_reward(self, car_position, currentRoadBlockIndex):
+        #Calculate reward
+        currentDistance = getDistanceFromStart(car_position, currentRoadBlockIndex) + 12.8
+        reward = (currentDistance - self.prevDistance)
+        self.prevDistance = currentDistance 
+        return reward
+
+    def process_episode(self):
+        #Reset env
+        agent.n_games += 1
+        agent.train_long_memory()
+        agent.trainer.episodes += 1
+        self.expObject = None
+
+        #Update scores
+        if self.prevDistance > self.record:
+            self.record = self.prevDistance
+            agent.target_model.save()
+
+        print('Game', agent.n_games, "Score:", round(self.prevDistance,2), 'Record:', round(self.record,2), "Exploration %:", round(agent.epsilon,2)*100)
+
+
     def on_run_step(self, iface: TMInterface, _time: int):
-        global interface_state
-        prevSpeed = 0
-        prevDistance = 0
-        
-        if _time >= 0 and _time % 1 == 0:
+        if _time >= 0 and _time % 50 == 0: #20fps
             interface_state = iface.get_simulation_state()
-            
-            currentRoadBlockIndex = None
             car_position = interface_state.position
-            for i in range(len(roadBlocks)):
-                if roadBlocks[i][0] - 8 < car_position[0] < roadBlocks[i][0] + 8: # x
-                    if roadBlocks[i][1] - 8 < car_position[2] < roadBlocks[i][1] + 8: # z
-                        currentRoadBlockIndex = i
-                        break
+            currentRoadBlockIndex = getCurrentRoadBlock(car_position)
 
             if currentRoadBlockIndex is not None:
-                agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, prevSpeed)
-                prevSpeed = agent_state.speed
+                agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
+                self.prevSpeed = agent_state[0] #used for calculating accel
+                #print(f"Speed: {agent_state[0]:.2f} Accel: {agent_state[1]:.2f}")
+                reward = self.get_reward(car_position, currentRoadBlockIndex)
+
+                #Calculate experience object based off last iteration's state action
+                if not human:
+                    if self.expObject is not None:
+                        self.expObject.append(reward) #reward
+                        self.expObject.append(agent_state) #new state
+                        self.expObject.append(False) #not game over since currentRoadBlock is valid
+
+                        #Train short memory
+                        agent.train_short_memory(*self.expObject)
+                        agent.remember(*self.expObject)
+                        #print(self.expObject)
 
 
-                #Calculate reward
-                currentDistance = getDistanceFromStart(interface_state, currentRoadBlockIndex)
-                reward = currentDistance - prevDistance
-                prevDistance = currentDistance
-                
-                print(reward)
+                    #State action for the current iteration
+                    state_old = agent_state
+                    final_action = agent.get_action(state_old)
+                    self.expObject = [state_old, final_action]
+                    play_action(iface, final_action)
 
-                
-            else:
-                print("Off track")
-            #iface.set_input_state(accelerate=True)
+            else: #Died - currentRoadBlockIndex is None
+                if not human:
+                    self.expObject += [-10, [0]*8, True] #punishment, empty state, game is done
+                    agent.train_short_memory(*self.expObject)
+                    agent.remember(*self.expObject)
+                    iface.respawn() #Reset env
+                    self.process_episode() #Train long memory 
 
-def pygameThread():
-    offset = 220
-    screen = pygame.display.set_mode((700,500))
-    running = True
-
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-                sys.exit()
-        
-        time.sleep(0.01)
-
-        visuals_carx = interface_state.position[0]-offset
-        visuals_cary = interface_state.position[2]-offset
-        
-        screen.fill((0,0,0))
-        
-        for r in roadBlocks:
-            draw_rectangle(r[0]-offset, r[1]-offset, 16,16, (255,0,0), screen, 1)
-
-        draw_rectangle(visuals_carx, visuals_cary, 4, 7, (255,255,255), screen, 0, interface_state.yaw_pitch_roll[0])
-
-
-            
-        pygame.display.update()
-        
-
-t1 = threading.Thread(target=pygameThread)
-t1.start()
 
 server_name = f'TMInterface{sys.argv[1]}' if len(sys.argv) > 1 else 'TMInterface0'
 print(f'Connecting to {server_name}...')
 run_client(MainClient(), server_name)
 
-
-##        pos = state.position
-##        for i in range(60):
-##            for j in range(60):
-##                if i*16-8 < pos[0] < i*16+8:
-##                    if j*16-8 < pos[2] < j*16+8:
-##                        blockCenter = (i*16, j*16)
-##                        if blockCenter not in roadBlocks:
-##                            roadBlocks.append(blockCenter)
-##                            print(blockCenter)
-##        for r in roadBlocks:
-##            pygame.draw.rect(screen, (255,0,0), pygame.Rect(r[0]-offset, r[1]-offset, 8, 8))
 
 
