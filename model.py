@@ -70,7 +70,8 @@ class QTrainer:
 
         if self.episodes % self.target_update_every == 0:
             self.target_model.load_state_dict(self.model.state_dict())
-            print("matched target")
+            print("Updated target model.")
+            self.episodes += 1 #avoid spamming print statements
 
 
 

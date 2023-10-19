@@ -9,7 +9,7 @@ from model import *
 MAX_MEMORY = 100_000
 BATCH_SIZE = 512
 MIN_EPSILON = 0.05
-epsilon_decay = 0.01
+epsilon_decay = 0.001
 epsilon = 2 # 1 + warming
 n_games = 0
 
@@ -30,7 +30,7 @@ memory = deque(maxlen=MAX_MEMORY) # popleft()
 model = Linear_QNet(8, 80, 80, 6)
 target_model = Linear_QNet(8, 80, 80, 6)
 #model.load_state_dict(torch.load("model/model.pth"))
-trainer = QTrainer(model, target_model, lr=0.001, gamma=0.99, target_update_every=5)
+trainer = QTrainer(model, target_model, lr=0.001, gamma=0.99, target_update_every=1000)
 
 def get_action(state):
     final_action = [0,0,0,0,0,0]
