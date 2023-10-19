@@ -30,7 +30,7 @@ memory = deque(maxlen=MAX_MEMORY) # popleft()
 model = Linear_QNet(8, 80, 80, 6)
 target_model = Linear_QNet(8, 80, 80, 6)
 #model.load_state_dict(torch.load("model/model.pth"))
-trainer = QTrainer(model, target_model, lr=0.001, gamma=0.99, target_update_every=1000)
+trainer = QTrainer(model, target_model, lr=0.001, gamma=0.995, target_update_every=500)
 
 def get_action(state):
     final_action = [0,0,0,0,0,0]

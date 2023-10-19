@@ -1,6 +1,4 @@
 import math
-import pygame
-
 
 action_space = {
     0: {'left': True, 'right': False, 'accelerate': False},

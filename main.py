@@ -9,7 +9,9 @@ import numpy as np
 import os
 import agent
 
-human = False
+human = True
+distance_plot = []
+
 
 class MainClient(Client):
     def __init__(self) -> None:
@@ -35,26 +37,26 @@ class MainClient(Client):
         agent.train_long_memory()
         agent.trainer.episodes += 1
         self.expObject = None
-
+        distance_plot.append(self.prevDistance)
         #Update scores
         if self.prevDistance > self.record:
             self.record = self.prevDistance
             agent.target_model.save()
 
-        print('Game', agent.n_games, "Score:", round(self.prevDistance,2), 'Record:', round(self.record,2), "Exploration %:", round(agent.epsilon,2)*100)
+        print('Game', agent.n_games, "Score:", round(self.prevDistance,2), 'Record:', round(self.record,2), "Exploration %:", round(agent.epsilon,3)*100)
 
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time >= 0 and _time % 50 == 0: #20fps
-            interface_state = iface.get_simulation_state()
-            car_position = interface_state.position
-            currentRoadBlockIndex = getCurrentRoadBlock(car_position)
-
+        if _time >= 0 and _time % 1 == 0: #20fps
+            #interface_state = iface.get_simulation_state()
+            #car_position = interface_state.position
+            #currentRoadBlockIndex = getCurrentRoadBlock(car_position)
+            currentRoadBlockIndex = 1
             if currentRoadBlockIndex is not None:
-                agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
-                self.prevSpeed = agent_state[0] #used for calculating accel
+                #agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
+                #self.prevSpeed = agent_state[0] #used for calculating accel
                 #print(f"Speed: {agent_state[0]:.2f} Accel: {agent_state[1]:.2f}")
-                reward = self.get_reward(car_position, currentRoadBlockIndex)
+                #reward = self.get_reward(car_position, currentRoadBlockIndex)
 
                 #Calculate experience object based off last iteration's state action
                 if not human:
@@ -77,7 +79,7 @@ class MainClient(Client):
 
             else: #Died - currentRoadBlockIndex is None
                 if not human:
-                    self.expObject += [-10, [0]*8, True] #punishment, empty state, game is done
+                    self.expObject += [-100, [0]*8, True] #beat the shit out of it, empty state, game is done
                     agent.train_short_memory(*self.expObject)
                     agent.remember(*self.expObject)
                     iface.respawn() #Reset env

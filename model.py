@@ -30,18 +30,18 @@ class QTrainer:
     def __init__(self, model, target_model, lr, gamma, target_update_every):
         self.lr = lr
         self.gamma = gamma
-        self.model = model
-        self.target_model = target_model
+        self.model = model.cuda()
+        self.target_model = target_model.cuda()
         self.target_update_every = target_update_every
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
         self.episodes = 1
 
     def train_step(self, state, action, reward, next_state, done):
-        state = torch.tensor(state, dtype=torch.float)
-        next_state = torch.tensor(next_state, dtype=torch.float)
-        action = torch.tensor(action, dtype=torch.long)
-        reward = torch.tensor(reward, dtype=torch.float)
+        state = torch.tensor(state, dtype=torch.float).cuda()
+        next_state = torch.tensor(next_state, dtype=torch.float).cuda()
+        action = torch.tensor(action, dtype=torch.long).cuda()
+        reward = torch.tensor(reward, dtype=torch.float).cuda()
         # (n, x)
 
         if len(state.shape) == 1: #add dimension if there is only 1 sample in the batch
