@@ -3,17 +3,20 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import os
+from utils import plot_data
+
+plot = []
 
 class Linear_QNet(nn.Module):
     def __init__(self, input_size, hidden1_size, hidden2_size, output_size):
         super().__init__()
         self.linear1 = nn.Linear(input_size, hidden1_size)
-        #self.linear2 = nn.Linear(hidden1_size, hidden2_size)
+        self.linear2 = nn.Linear(hidden1_size, hidden2_size)
         self.linear3 = nn.Linear(hidden1_size, output_size)
 
     def forward(self, x):
         x = F.relu(self.linear1(x))
-        #x = F.relu(self.linear2(x))
+        x = F.relu(self.linear2(x))
         x = self.linear3(x)
         return x
 
@@ -24,28 +27,31 @@ class Linear_QNet(nn.Module):
 
         file_name = os.path.join(model_folder_path, file_name)
         torch.save(self.state_dict(), file_name)
+        print("Saved model at", file_name)
 
 
 class QTrainer:
     def __init__(self, model, target_model, lr, gamma, target_update_every):
         self.lr = lr
         self.gamma = gamma
-        self.model = model.cuda()
-        self.target_model = target_model.cuda()
+        self.model = model
+        self.target_model = target_model
         self.target_update_every = target_update_every
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
         self.episodes = 1
 
-    def train_step(self, state, action, reward, next_state, done):
+    def cudafy_tensors(self, state, action, reward, next_state):
         state = torch.tensor(state, dtype=torch.float).cuda()
         next_state = torch.tensor(next_state, dtype=torch.float).cuda()
         action = torch.tensor(action, dtype=torch.long).cuda()
         reward = torch.tensor(reward, dtype=torch.float).cuda()
-        # (n, x)
+        return state, action, reward, next_state
+    
+    def train_step(self, state, action, reward, next_state, done):
+        state, action, reward, next_state = self.cudafy_tensors(state, action, reward, next_state)
 
         if len(state.shape) == 1: #add dimension if there is only 1 sample in the batch
-            # (1, x)
             state = torch.unsqueeze(state, 0)
             next_state = torch.unsqueeze(next_state, 0)
             action = torch.unsqueeze(action, 0)
@@ -67,6 +73,7 @@ class QTrainer:
         loss = self.criterion(target_Q, pred_Q)
         loss.backward()
         self.optimizer.step()
+        plot.append(loss.item())
 
         if self.episodes % self.target_update_every == 0:
             self.target_model.load_state_dict(self.model.state_dict())

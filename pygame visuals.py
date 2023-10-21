@@ -1,9 +1,26 @@
 import pygame
-
-
+from utils import *
+import os
+import threading
+import time
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10, 50)
 
+def draw_rectangle(x, y, width, height, color, screen, line_width ,rot_radians=0):
+    points = []
+
+    radius = math.sqrt((height / 2)**2 + (width / 2)**2)
+
+    angle = math.atan2(height / 2, width / 2)
+
+    angles = [angle, -angle + math.pi, angle + math.pi, -angle]
+
+    for angle in angles:
+        y_offset = -1 * radius * math.sin(angle + rot_radians)
+        x_offset = radius * math.cos(angle + rot_radians)
+        points.append((x + x_offset, y + y_offset))
+
+    pygame.draw.polygon(screen, color, points, line_width)
 
 
 def pygameThread():
@@ -22,11 +39,13 @@ def pygameThread():
         
         time.sleep(0.01)
 
-        visuals_carx = interface_state.position[0]-offset
-        visuals_cary = interface_state.position[2]-offset
+        #visuals_carx = interface_state.position[0]-offset
+        #visuals_cary = interface_state.position[2]-offset
         
         screen.fill((0,0,0))
 
+        for c in cl:
+            pygame.draw.rect(screen, (255, 0, 255), (c[0]-offset, c[1]-offset, 1,1))
 
         i = 0
         for r in roadBlocks:
@@ -36,15 +55,15 @@ def pygameThread():
             screen.blit(text_surface, (r[0]-offset, r[1]-offset))
 
         #car rect
-        draw_rectangle(visuals_carx, visuals_cary, 4, 7, (255,255,255), screen, 0, interface_state.yaw_pitch_roll[0])
+        #draw_rectangle(visuals_carx, visuals_cary, 4, 7, (255,255,255), screen, 0, interface_state.yaw_pitch_roll[0])
 
         pygame.display.update()
 
 
 
 
-#t1 = threading.Thread(target=pygameThread)
-#t1.start()
+t1 = threading.Thread(target=pygameThread)
+t1.start()
 
         
 ##        pos = state.position
