@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import os
 from utils import plot_data
 
-plot = []
+loss_plot = []
 
 class Linear_QNet(nn.Module):
     def __init__(self, input_size, hidden1_size, hidden2_size, output_size):
@@ -31,15 +31,22 @@ class Linear_QNet(nn.Module):
 
 
 class QTrainer:
-    def __init__(self, model, target_model, lr, gamma, target_update_every):
+    def __init__(self, model, target_model, lr, gamma, TAU):
         self.lr = lr
         self.gamma = gamma
+        self.TAU = TAU
         self.model = model
         self.target_model = target_model
-        self.target_update_every = target_update_every
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
         self.episodes = 1
+        
+    def update_target_model(self):
+        target_net_state_dict = self.target_model.state_dict()
+        policy_net_state_dict = self.model.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*self.TAU + target_net_state_dict[key]*(1-self.TAU)
+        self.target_model.load_state_dict(target_net_state_dict)
 
     def cudafy_tensors(self, state, action, reward, next_state):
         state = torch.tensor(state, dtype=torch.float).cuda()
@@ -72,15 +79,12 @@ class QTrainer:
         self.optimizer.zero_grad()
         loss = self.criterion(target_Q, pred_Q)
         loss.backward()
+
         self.optimizer.step()
-        plot.append(loss.item())
+        self.update_target_model()
 
-        if self.episodes % self.target_update_every == 0:
-            self.target_model.load_state_dict(self.model.state_dict())
-            print("Updated target model.")
-            self.episodes += 1 #avoid spamming print statements
-
-
+        loss_plot.append(loss.item())
+        
 
 
 

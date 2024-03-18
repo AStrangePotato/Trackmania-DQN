@@ -3,6 +3,8 @@ from utils import *
 import os
 import threading
 import time
+import math
+import sys
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10, 50)
 
@@ -24,8 +26,7 @@ def draw_rectangle(x, y, width, height, color, screen, line_width ,rot_radians=0
 
 
 def pygameThread():
-    pygame.font.init() # you have to call this at the start, 
-                   # if you want to use this module.
+    pygame.font.init()
     my_font = pygame.font.SysFont('Comic Sans MS', 12)
     offset = 220
     screen = pygame.display.set_mode((700,500))

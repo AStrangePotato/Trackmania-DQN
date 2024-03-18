@@ -3,70 +3,73 @@ from tminterface.client import Client, run_client
 from trackObservations import *
 
 import sys
-import threading
-import time
 import numpy as np
-import os
 import agent
 import utils
+import pickle
+import random
 
 human = False
-distance_plot = []
-
 
 class MainClient(Client):
     def __init__(self) -> None:
-        super(MainClient, self).__init__()
+        super(MainClient, self).__init__()        
+        with open(r"states/trainingStates.sim", "rb") as file:
+            self.states = pickle.load(file)
         self.prevSpeed = 0
         self.prevDistance = 0
         self.expObject = None #expObject = list [state, action it took, reward for action, new state, done]
         self.record = 0
 
+
     def on_registered(self, iface: TMInterface) -> None:
         print(f'Registered to {iface.server_name}')
 
-    #Calculate reward
     def get_reward(self, car_position, currentRoadBlockIndex):
         currentDistance = getClosestCenterlinePoint(car_position, currentRoadBlockIndex)
         reward = (currentDistance - self.prevDistance)
         self.prevDistance = currentDistance 
-        return reward * utils.inc
+        return reward
 
-    def process_episode(self):
-        #Reset env
+    def process_episode(self, finish=False):
+        if finish:
+            self.expObject += [10, [0] * 7, True] #get the ice cream, empty state, game is done
+        else:
+            self.expObject += [0, [0] * 7, True] #get the whip, empty state, game is done
+
+        agent.train_short_memory(*self.expObject)
+        agent.remember(*self.expObject)
+
         agent.n_games += 1
-        if agent.n_games > agent.WARMING:
-            agent.train_long_memory()
+        agent.epsilon = max(agent.MIN_EPSILON, agent.epsilon - agent.epsilon_decay)
         agent.trainer.episodes += 1
         self.expObject = None
-        distance_plot.append(self.prevDistance)
-        #Update scores
-        if self.prevDistance > self.record:
-            self.record = self.prevDistance
-            agent.target_model.save("record_model.pth")
 
-        print('Game', agent.n_games, "Score:", round(self.prevDistance,2), 'Record:', round(self.record,2), "Exploration %:", round(agent.epsilon,3)*100)
+        agent.train_long_memory()
+
+        print('Game', agent.n_games, "Exploration %:", round(agent.epsilon,3)*100)
 
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 100 == 0: #10fps
+        if _time > 0 and _time % 120 == 0: #8fps, 1000ms/s
             interface_state = iface.get_simulation_state()
+
             car_position = interface_state.position
             currentRoadBlockIndex = getCurrentRoadBlock(car_position)
+            ypr = interface_state.yaw_pitch_roll
 
-            if currentRoadBlockIndex is not None:
-                #Get and scale state
+            if currentRoadBlockIndex is not None and currentRoadBlockIndex < 143 and abs(ypr[2]) < 0.1 and abs(ypr[1]) < 0.05:
                 agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
                 self.prevSpeed = agent_state[0] #used for calculating accel
-                scaled_state = scaleAgentInputs(*agent_state)
-                
                 reward = self.get_reward(car_position, currentRoadBlockIndex)
+                if interface_state.scene_mobil.input_gas == 0:
+                    reward -= 0.5
 
                 #Calculate experience object based off last iteration's state action
                 if not human:
                     if self.expObject is not None:
                         self.expObject.append(reward) #reward
-                        self.expObject.append(scaled_state) #new state
+                        self.expObject.append(agent_state) #new state
                         self.expObject.append(False) #not game over since currentRoadBlock is valid
 
                         #Train short memory
@@ -74,33 +77,26 @@ class MainClient(Client):
                         agent.remember(*self.expObject)
 
                     #State action for the current iteration
-                    state_old = scaled_state
+                    state_old = agent_state
                     final_action = agent.get_action(state_old)
                     self.expObject = [state_old, final_action]
-                    play_action(iface, final_action)
+                    utils.play_action(iface, final_action)
 
 
             else: #Died - currentRoadBlockIndex is None
                 if not human:
                     if self.expObject is not None:
-                        self.expObject += [-10, [0] * 8, True] #beat the shit out of it, empty state, game is done
-                        agent.train_short_memory(*self.expObject)
-                        agent.remember(*self.expObject)
-                        respawn(iface) #Reset env
-                        self.process_episode() #Train long memory 
-
-            #Agent timeout
-            if _time > 111830+60000:
-                if not human:
-                    respawn(iface)  
+                        iface.rewind_to_state(random.choice(self.states))
+                        if currentRoadBlockIndex is not None and currentRoadBlockIndex >= 143:
+                            self.process_episode(finish=True) #Train long memory
+                        else:
+                            self.process_episode() #Train long memory 
 
 
-def respawn(iface):
-    iface.rewind_to_state(utils.initial_state)
 
 if __name__ == "__main__":
     server_name = f'TMInterface{sys.argv[1]}' if len(sys.argv) > 1 else 'TMInterface0'
-    print(f'Connecting to {server_name}...')
+    print(f'Attempting to connect to {server_name}...')
     run_client(MainClient(), server_name)
 
 

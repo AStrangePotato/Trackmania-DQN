@@ -2,25 +2,23 @@ import math
 from utils import *
 
 def getAgentInputs(state, currentRoadBlockIndex, prevSpeed):
+    
     a = (state.velocity[0]**2 + state.velocity[2]**2)**0.5
     b = a - prevSpeed
     c = state.scene_mobil.turning_rate
-    d = getLateralVelocity(state, c)
-    e = getDistanceToCenterLine(state, currentRoadBlockIndex)
-    f = getAngleToCenterline(state, currentRoadBlockIndex)
-    g = getDistanceToNextTurn(state, currentRoadBlockIndex)
-    h = getNextTurnDirection(state, currentRoadBlockIndex)
+    d = getDistanceToCenterLine(state, currentRoadBlockIndex)
+    e = getAngleToCenterline(state, currentRoadBlockIndex) #???
+    f = getDistanceToNextTurn(state, currentRoadBlockIndex)
+    g = getNextTurnDirection(state, currentRoadBlockIndex)
     
-    return [a,b,c,d,e,f,g,h]
+    return [a,b,c,d,e,f,g]
     
-
-def scaleAgentInputs(a,b,c,d,e,f,g,h):
-    return [a/50,b,c,d/45,e/8,f/3.14,g/50,h]
 
 def getCurrentRoadBlock(car_position):
+    width = 8
     for i in range(len(roadBlocks)):
-        if roadBlocks[i][0] - 8 < car_position[0] < roadBlocks[i][0] + 8: # x
-            if roadBlocks[i][1] - 8 < car_position[2] < roadBlocks[i][1] + 8: # z
+        if roadBlocks[i][0] - width < car_position[0] < roadBlocks[i][0] + width: # x
+            if roadBlocks[i][1] - width < car_position[2] < roadBlocks[i][1] + width: # z
                 return i
 
     #not on a road block
@@ -28,7 +26,8 @@ def getCurrentRoadBlock(car_position):
 
 def getCenterlineEndblock(currentRoadBlockIndex):
     nextCorner = currentRoadBlockIndex + 1
-    while True:
+    centerline_end_block = roadBlocks[143]
+    while nextCorner < 144:
         if nextCorner in cornerBlockIndices:
             centerline_end_block = roadBlocks[nextCorner]
             break
@@ -36,7 +35,6 @@ def getCenterlineEndblock(currentRoadBlockIndex):
             nextCorner += 1
 
     return centerline_end_block
-
 
 def getLateralVelocity(state, turning_rate):
     pi = 3.14159
@@ -61,8 +59,11 @@ def getLateralVelocity(state, turning_rate):
     
 def getAngleToCenterline(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
+
     centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
+    
     pi = 3.141592
+    
     yaw = state.yaw_pitch_roll[0]
 
     #Case 1: road continues in the x direction -> z stays the same
@@ -84,7 +85,6 @@ def getAngleToCenterline(state, currentRoadBlockIndex):
         return angle_to_centerline
     else:
         return angle_to_centerline - 2*pi
-
 
 def getNextTurnDirection(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
@@ -118,7 +118,6 @@ def getNextTurnDirection(state, currentRoadBlockIndex):
                 
     return next_turn_direction
 
-
 def getDistanceToNextTurn(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
     centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
@@ -141,7 +140,6 @@ def getDistanceToNextTurn(state, currentRoadBlockIndex):
 
     return dist_to_next_turn
 
-
 def getDistanceToCenterLine(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
     
@@ -159,7 +157,6 @@ def getDistanceToCenterLine(state, currentRoadBlockIndex):
 
     return dist_to_centerline
 
-
 def dist(point1, point2):
     x1, y1 = point1
     x2, y2 = point2
@@ -167,15 +164,23 @@ def dist(point1, point2):
 
 def getClosestCenterlinePoint(position, current, return_dist=False):
     position = (position[0], position[2])
-    start = current * int(16 / inc)
+    start = current * int(16 / 0.5) + 10
     closest = 999
     closestIndex = 0
-    #print("Searching in", start, start+32)
-    for i in range(start-16, start + 16):
-        d = dist(position, cl[i])
-        if d < closest:
-            closest = d
-            closestIndex = i
+
+    if current == 0:
+        for i in range(0, 45): #random number that is definitely greater than the range
+            d = dist(position, cl[i])
+            if d < closest:
+                closest = d
+                closestIndex = i
+
+    else:
+        for i in range(start-16, start + 16):
+            d = dist(position, cl[i])
+            if d < closest:
+                closest = d
+                closestIndex = i
 
     if return_dist:
         return closest
