@@ -1,5 +1,3 @@
-# OvertakeAI: TrackMania AI with DQN
-
 ![Banner](https://github.com/user-attachments/assets/f748eba0-341e-48a9-9264-be26fb677b56)
 
 
