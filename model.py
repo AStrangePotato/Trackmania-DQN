@@ -80,6 +80,7 @@ class QTrainer:
         loss = self.criterion(target_Q, pred_Q)
         loss.backward()
 
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
         self.optimizer.step()
         self.update_target_model()
 

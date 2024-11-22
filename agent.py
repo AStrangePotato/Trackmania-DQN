@@ -8,12 +8,14 @@ from model import *
 from utils import plot_data
 from model import loss_plot as p
 
-MAX_MEMORY = 200_000
-BATCH_SIZE = 256
-MIN_EPSILON = 0.1
-epsilon_decay = 0.0001
-epsilon = 0.2
+MAX_MEMORY = 250_000
+BATCH_SIZE = 128
+MIN_EPSILON = 0.12
+ACTION_SPACE = 5
+epsilon_decay = 0.0002
+epsilon = 0.7
 n_games = 0
+
 
 def save_memories():
     with open('memory_deque.pkl', 'wb') as file:
@@ -27,20 +29,21 @@ def load_memories():
         print("Loaded previous memory of size", len(memory), "elements.")
 
 
-load_memories()
-model = Linear_QNet(7, 128, 128, 6).cuda()
-target_model = Linear_QNet(7, 128, 128, 6).cuda()
+#load_memories()
+memory = deque(maxlen=MAX_MEMORY)
+model = Linear_QNet(7, 128, 128, ACTION_SPACE).cuda()
+target_model = Linear_QNet(7, 128, 128, ACTION_SPACE).cuda()
 trainer = QTrainer(model, target_model, lr=0.0002, gamma=0.99, TAU=0.005)
 
-model.load_state_dict(torch.load("model/model.pth"))
-target_model.load_state_dict(torch.load("model/model.pth"))
-print("Loaded models.")
+#model.load_state_dict(torch.load("model/model.pth"))
+#target_model.load_state_dict(torch.load("model/model.pth"))
+#print("Loaded models.")
 
 
 def get_action(state):
-    final_action = [0,0,0,0,0,0]
+    final_action = [0] * ACTION_SPACE
     if random.uniform(0,1) <= epsilon:
-        action = random.randint(0,5)
+        action = random.randint(0, ACTION_SPACE-1)
         final_action[action] = 1
 
     else:

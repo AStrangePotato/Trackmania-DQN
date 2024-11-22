@@ -8,7 +8,7 @@ import time
 states = []
 
 
-with open(r"noInputStates.sim", "rb") as file:
+with open(r"states/trainingStates.sim", "rb") as file:
     states = pickle.load(file)
 
 class MainClient(Client):

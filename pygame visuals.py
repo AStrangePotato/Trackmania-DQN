@@ -1,10 +1,10 @@
 import pygame
-from utils import *
 import os
 import threading
 import time
 import math
 import sys
+from roadblock_mapper import roadBlocks
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10, 50)
 
@@ -45,8 +45,8 @@ def pygameThread():
         
         screen.fill((0,0,0))
 
-        for c in cl:
-            pygame.draw.rect(screen, (255, 0, 255), (c[0]-offset, c[1]-offset, 1,1))
+        #for c in cl:
+        #    pygame.draw.rect(screen, (255, 0, 255), (c[0]-offset, c[1]-offset, 1,1))
 
         i = 0
         for r in roadBlocks:

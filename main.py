@@ -62,8 +62,6 @@ class MainClient(Client):
                 agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
                 self.prevSpeed = agent_state[0] #used for calculating accel
                 reward = self.get_reward(car_position, currentRoadBlockIndex)
-                if interface_state.scene_mobil.input_gas == 0:
-                    reward -= 0.5
 
                 #Calculate experience object based off last iteration's state action
                 if not human:
