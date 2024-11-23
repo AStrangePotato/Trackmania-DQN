@@ -12,7 +12,7 @@ class Linear_QNet(nn.Module):
         super().__init__()
         self.linear1 = nn.Linear(input_size, hidden1_size)
         self.linear2 = nn.Linear(hidden1_size, hidden2_size)
-        self.linear3 = nn.Linear(hidden1_size, output_size)
+        self.linear3 = nn.Linear(hidden2_size, output_size)
 
     def forward(self, x):
         x = F.relu(self.linear1(x))
@@ -38,7 +38,7 @@ class QTrainer:
         self.model = model
         self.target_model = target_model
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss()
         self.episodes = 1
         
     def update_target_model(self):

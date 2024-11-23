@@ -1,0 +1,28 @@
+import pyautogui
+import random
+import string
+import time
+
+# Function to move the cursor to a random position in the middle of the screen
+def move_cursor():
+    screen_width, screen_height = pyautogui.size()
+    mid_x = screen_width // 2
+    mid_y = screen_height // 2
+    # Slightly randomize the cursor's position within a small region around the center
+    random_x = random.randint(mid_x - 200, mid_x + 200)
+    random_y = random.randint(mid_y - 200, mid_y + 200)
+    pyautogui.moveTo(random_x, random_y, duration=2)  # Move cursor with a 2-second duration
+
+# Function to type a small amount of random "code"
+def type_random_code():
+    random_text = ''.join(random.choices(string.ascii_letters + '();', k=15))  # Random short "code"
+    pyautogui.typewrite(random_text, interval=0.2)  # Type with a small interval
+
+# Main loop to simulate activity
+while True:
+    move_cursor()
+    time.sleep(random.uniform(5, 10))  # Wait between 5 and 10 seconds before moving the cursor
+    type_random_code()
+    time.sleep(random.uniform(10, 20))  # Wait between 10 and 20 seconds before typing again
+    pyautogui.click()
+    time.sleep(random.uniform(5, 15))  # Wait between 5 and 15 seconds before the next cycle

@@ -16,7 +16,7 @@ class MainClient(Client):
 
     def on_run_step(self, iface: TMInterface, _time: int):
 
-        if _time > 0 and _time % 1000 == 0:
+        if _time > 0 and _time % 100 == 0:
             state = iface.get_simulation_state()
             pos = state.position
             for i in range(60):

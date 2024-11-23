@@ -1,8 +1,9 @@
 import math
 from utils import *
 
+
+
 def getAgentInputs(state, currentRoadBlockIndex, prevSpeed):
-    
     a = (state.velocity[0]**2 + state.velocity[2]**2)**0.5
     b = a - prevSpeed
     c = state.scene_mobil.turning_rate
@@ -26,8 +27,8 @@ def getCurrentRoadBlock(car_position):
 
 def getCenterlineEndblock(currentRoadBlockIndex):
     nextCorner = currentRoadBlockIndex + 1
-    centerline_end_block = roadBlocks[143]
-    while nextCorner < 144:
+    centerline_end_block = roadBlocks[-1]
+    while nextCorner < NUM_BLOCKS:
         if nextCorner in cornerBlockIndices:
             centerline_end_block = roadBlocks[nextCorner]
             break
@@ -142,7 +143,7 @@ def getDistanceToNextTurn(state, currentRoadBlockIndex):
 
 def getDistanceToCenterLine(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
-    
+
     if currentRoadBlockIndex != 0 and currentRoadBlockIndex not in cornerBlockIndices:
         #Case 1: road continues in the x direction -> z stays the same
         if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
