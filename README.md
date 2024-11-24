@@ -20,4 +20,4 @@ This project uses `TMInterface` to control and train an AI agent for *TrackMania
 - TrackMania installation
 
 ## Development
-- This project is currently not being maintained. I do not have a GPU anymore.
+- This project is currently under development, and dependencies and other packages are unstable and subject to change.
