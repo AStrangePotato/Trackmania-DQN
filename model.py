@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import os
-from utils import plot_data
 
 loss_plot = []
 
@@ -83,7 +82,7 @@ class QTrainer:
         nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
         self.optimizer.step()
         self.update_target_model()
-
+        
         loss_plot.append(loss.item())
         
 

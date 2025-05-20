@@ -10,14 +10,13 @@ import pickle
 import random
 from multiprocessing import shared_memory
 
-human = True
+human = False
 
 # Create a shared memory buffer
 shm = shared_memory.SharedMemory(create=True, name="tmdata", size=80)  # 3 floats for x, y, z + 7 floats for agent state
 shared_data = np.ndarray((10,), dtype=np.float64, buffer=shm.buf)  # Total of 10 floats
 
 print("Shared memory created:", shm.name)
-
 
 class MainClient(Client):
     def __init__(self) -> None:
@@ -36,17 +35,17 @@ class MainClient(Client):
         currentDistance = getClosestCenterlinePoint(car_position, currentRoadBlockIndex)
         reward = (currentDistance - self.prevDistance)
         self.prevDistance = currentDistance 
-        return reward
+        return reward * 5
 
     def process_episode(self):
-        self.expObject += [0, [0] * 7, True] #get the whip, empty state, game is done
+        self.expObject += [-5, [0] * 7, True] #reward, empty state of length input space, game is done
 
         agent.train_short_memory(*self.expObject)
         agent.remember(*self.expObject)
 
         agent.n_games += 1
-        agent.epsilon = max(agent.MIN_EPSILON, agent.epsilon - agent.epsilon_decay)
-        agent.temperature = max(0.1, agent.temperature*0.99)
+        agent.epsilon = max(agent.MIN_EPSILON, agent.epsilon * agent.epsilon_decay)
+
         agent.trainer.episodes += 1
         self.expObject = None
 
@@ -56,18 +55,19 @@ class MainClient(Client):
 
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 100 == 0: #10fps, 1000ms/s
+        if _time > 0 and _time % 120 == 0: #10fps, 1000ms/s
             interface_state = iface.get_simulation_state()
 
             car_position = interface_state.position
             currentRoadBlockIndex = getCurrentRoadBlock(car_position)
-            ypr = interface_state.yaw_pitch_roll
 
-            if currentRoadBlockIndex is not None and abs(ypr[2]) < 0.1:
+            if currentRoadBlockIndex is not None and abs(interface_state.yaw_pitch_roll[2]) < 0.1:
                 agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
-                self.prevSpeed = agent_state[0] #used for calculating accel
-                reward = self.get_reward(car_position, currentRoadBlockIndex)
 
+                self.prevSpeed = agent_state[0] #used for calculating accel
+                reward = -agent_state[3] + agent_state[0] * 15
+                
+                print(reward)
                 #Load into shared memory for visualization
                 shared_data[:3] = car_position  # First 3 values for car position [x, y, z]
                 shared_data[3:] = agent_state   # Next 7 values for agent state [a, b, c, d, e, f, g]
@@ -75,10 +75,8 @@ class MainClient(Client):
                 #Calculate experience object based off last iteration's state action
                 if not human:
                     if self.expObject is not None:
-                        self.expObject.append(reward) #reward
-                        self.expObject.append(agent_state) #new state
-                        self.expObject.append(False) #not game over since currentRoadBlock is valid
-
+                        self.expObject += [reward, agent_state, False]
+                        
                         #Train short memory
                         agent.train_short_memory(*self.expObject)
                         agent.remember(*self.expObject)
@@ -89,12 +87,13 @@ class MainClient(Client):
                     self.expObject = [state_old, final_action]
                     utils.play_action(iface, final_action)
 
-
             else: #Died - currentRoadBlockIndex is None
                 if not human:
                     if self.expObject is not None:
-                        #iface.rewind_to_state(random.choice(self.states))
-                        iface.respawn()
+                        random_state = random.choice(self.states)
+                        random_state.position[0] += random.uniform(-1, 1)  # Add random offset to x
+                        random_state.position[2] += random.uniform(-1, 1)  # Add random offset to z
+                        iface.rewind_to_state(random_state)
                         self.process_episode() #Train long memory 
 
 
@@ -106,3 +105,7 @@ if __name__ == "__main__":
 
 
 
+def sv():
+    agent.save_memories()
+    agent.target_model.save()
+    print("Saved shit.")

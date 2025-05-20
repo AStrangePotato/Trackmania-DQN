@@ -8,10 +8,19 @@ def getAgentInputs(state, currentRoadBlockIndex, prevSpeed):
     b = a - prevSpeed
     c = state.scene_mobil.turning_rate
     d = getDistanceToCenterLine(state, currentRoadBlockIndex)
-    e = getAngleToCenterline(state, currentRoadBlockIndex) #???
+    e = getAngleToCenterline(state, currentRoadBlockIndex)
     f = getDistanceToNextTurn(state, currentRoadBlockIndex)
     g = getNextTurnDirection(state, currentRoadBlockIndex)
-    
+        
+    # Normalize each feature
+    a = a / 50  # Normalize speed
+    b = b / 50  # Normalize speed difference (change in speed)
+    c = c  # Normalize turning rate
+    d = d / 8  # Normalize distance to centerline
+    e = e / 3.14  # Normalize angle to centerline (between -1 and 1)
+    f = f / 100  # Normalize distance to next turn
+    g = g  # Direction is already categorical (0 or 1)
+
     return [a,b,c,d,e,f,g]
     
 
@@ -142,15 +151,15 @@ def getDistanceToNextTurn(state, currentRoadBlockIndex):
     return dist_to_next_turn
 
 def getDistanceToCenterLine(state, currentRoadBlockIndex):
-    currentBlockCenter = roadBlocks[currentRoadBlockIndex]
+    if currentRoadBlockIndex not in cornerBlockIndices:
+        currentBlockCenter = roadBlocks[currentRoadBlockIndex]
 
-    if currentRoadBlockIndex != 0 and currentRoadBlockIndex not in cornerBlockIndices:
         #Case 1: road continues in the x direction -> z stays the same
         if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
             dist_to_centerline = abs(currentBlockCenter[1] - state.position[2])
 
         #Case 2: road continues in the z direction -> x stays the same
-        if currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
+        elif currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
             dist_to_centerline = abs(currentBlockCenter[0] - state.position[0])
 
     else: #on a corner
