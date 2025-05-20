@@ -19,7 +19,7 @@ def getAgentInputs(state, currentRoadBlockIndex, prevSpeed):
     d = d / 8  # Normalize distance to centerline
     e = e / 3.14  # Normalize angle to centerline (between -1 and 1)
     f = f / 100  # Normalize distance to next turn
-    g = g  # Direction is already categorical (0 or 1)
+    g = g 
 
     return [a,b,c,d,e,f,g]
     
@@ -172,28 +172,22 @@ def dist(point1, point2):
     x2, y2 = point2
     return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-def getClosestCenterlinePoint(position, current, return_dist=False):
-    position = (position[0], position[2])
-    start = current * int(16 / 0.5) + 10
-    closest = 999
-    closestIndex = 0
+def getClosestCenterlinePoint(position, roadBlockIndex, return_dist=False):
+    px, _, pz = position
+    pos2d = (px, pz)
 
-    if current == 0:
-        for i in range(0, 45): #random number that is definitely greater than the range
-            d = dist(position, cl[i])
-            if d < closest:
-                closest = d
-                closestIndex = i
+    samples_per_block = int(16 / 0.5)  # 32 samples per block
+    start_idx = max(0, roadBlockIndex * samples_per_block - 10)
+    end_idx   = min(NUM_CL, start_idx + 50)  # scan up to 50 points ahead
 
-    else:
-        for i in range(start-16, start + 16):
-            d = dist(position, cl[i])
-            if d < closest:
-                closest = d
-                closestIndex = i
+    closest_dist = float('inf')
+    closest_idx  = start_idx
 
-    if return_dist:
-        return closest
+    for idx in range(start_idx, end_idx):
+        d = dist(pos2d, cl[idx])
+        if d < closest_dist:
+            closest_dist = d
+            closest_idx  = idx
 
-    return closestIndex
+    return closest_dist if return_dist else closest_idx
 

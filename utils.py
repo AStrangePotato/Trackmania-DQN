@@ -87,3 +87,4 @@ roadBlocks = [(528, 528), (528, 512), (528, 496), (528, 480), (512, 480), (496, 
 cl = generateCenterline(roadBlocks)
 cornerBlockIndices = generateCorners(roadBlocks)
 NUM_BLOCKS = len(roadBlocks)
+NUM_CL = len(cl)

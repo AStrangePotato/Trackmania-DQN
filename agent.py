@@ -10,10 +10,10 @@ from utils import plot_data
 
 MAX_MEMORY = 100_000
 BATCH_SIZE = 64
-MIN_EPSILON = 0.12
+MIN_EPSILON = 0.15
 ACTION_SPACE = 6
 epsilon_decay = 0.999
-epsilon = 1
+epsilon = 0.3
 n_games = 0
 
 #plot_data(loss_plot)
@@ -29,15 +29,15 @@ def load_memories():
         print("Loaded previous memory of size", len(memory), "elements.")
 
 
-#load_memories()
-memory = deque(maxlen=MAX_MEMORY)
+load_memories()
+#memory = deque(maxlen=MAX_MEMORY)
 model = Linear_QNet(7, 64, 64, ACTION_SPACE).cuda()
 target_model = deepcopy(model)
 trainer = QTrainer(model, target_model, lr=0.0005, gamma=0.99, TAU=0.005)
 
-# model.load_state_dict(torch.load("model/model.pth"))
-# target_model.load_state_dict(torch.load("model/model.pth"))
-# print("Loaded models.")
+model.load_state_dict(torch.load("model/model.pth"))
+target_model.load_state_dict(torch.load("model/model.pth"))
+print("Loaded models.")
 
 
 def get_action(state):

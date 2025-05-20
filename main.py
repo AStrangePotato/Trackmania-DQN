@@ -1,111 +1,112 @@
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
 from trackObservations import *
-
-import sys
-import numpy as np
-import agent
-import utils
-import pickle
-import random
+import sys, os, numpy as np, pickle, random
 from multiprocessing import shared_memory
+import agent, utils
 
-human = False
-
-# Create a shared memory buffer
-shm = shared_memory.SharedMemory(create=True, name="tmdata", size=80)  # 3 floats for x, y, z + 7 floats for agent state
-shared_data = np.ndarray((10,), dtype=np.float64, buffer=shm.buf)  # Total of 10 floats
-
+# shared memory setup (unchanged)
+shm = shared_memory.SharedMemory(create=True, name="tmdata", size=80)
+shared_data = np.ndarray((10,), dtype=np.float64, buffer=shm.buf)
 print("Shared memory created:", shm.name)
 
 class MainClient(Client):
-    def __init__(self) -> None:
-        super(MainClient, self).__init__()        
-        with open(r"states/trainingStates.sim", "rb") as file:
-            self.states = pickle.load(file)
-        self.prevSpeed = 0
-        self.prevDistance = 0
-        self.expObject = None #expObject = list [state, action it took, reward for action, new state, done]
-        self.record = 0
+    def __init__(self):
+        super().__init__()
+        with open("states/trainingStates.sim", "rb") as f:
+            self.states = pickle.load(f)
 
-    def on_registered(self, iface: TMInterface) -> None:
-        print(f'Registered to {iface.server_name}')
+        # placeholders for tracking previous
+        self.prevSpeed = 0.0
+        self.prevDistance = 0.0
 
-    def get_reward(self, car_position, currentRoadBlockIndex):
-        currentDistance = getClosestCenterlinePoint(car_position, currentRoadBlockIndex)
-        reward = (currentDistance - self.prevDistance)
-        self.prevDistance = currentDistance 
-        return reward * 5
-
-    def process_episode(self):
-        self.expObject += [-5, [0] * 7, True] #reward, empty state of length input space, game is done
-
-        agent.train_short_memory(*self.expObject)
-        agent.remember(*self.expObject)
-
-        agent.n_games += 1
-        agent.epsilon = max(agent.MIN_EPSILON, agent.epsilon * agent.epsilon_decay)
-
-        agent.trainer.episodes += 1
+        # holds (state, action) of last step; full transitions built on the fly
         self.expObject = None
 
+        self.human = False
+
+    def on_registered(self, iface: TMInterface):
+        print(f"Registered to {iface.server_name}")
+
+    def get_reward(self, car_position, currentRoadBlockIndex):
+        curr = getClosestCenterlinePoint(car_position, currentRoadBlockIndex)
+        r = curr - self.prevDistance
+        self.prevDistance = curr
+        return r
+
+    def process_terminal(self, iface, last_state, last_action):
+        transition = (last_state, last_action, -10, last_state, True)
+        agent.train_short_memory(*transition)
+        agent.remember(*transition)
+
+        # complete the episode
         agent.train_long_memory()
+        agent.n_games += 1
+        agent.epsilon = max(agent.MIN_EPSILON, agent.epsilon * agent.epsilon_decay)
+        agent.trainer.episodes += 1
+        print(f"Game {agent.n_games:3d}  Exploration: {agent.epsilon*100:.1f}%")
 
-        print('Game', agent.n_games, "Exploration %:", round(agent.epsilon,3)*100)
+        # pick a random spawn state and reset sim
+        random_state = random.choice(self.states)
+        # add small noise
+        random_state.position[0] += random.uniform(-1,1)
+        random_state.position[2] += random.uniform(-1,1)
+        iface.rewind_to_state(random_state)
 
+        # reset prevDistance and prevSpeed to avoid spurious first reward
+        self.prevDistance = getClosestCenterlinePoint(random_state.position, getCurrentRoadBlock(random_state.position))
+        self.prevSpeed = 0.0
+
+        # clear the expObject so next step starts fresh
+        self.expObject = None
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 120 == 0: #10fps, 1000ms/s
-            interface_state = iface.get_simulation_state()
+        if _time > 0 and _time % 120 == 0:
+            tmi_state = iface.get_simulation_state()
+            pos = tmi_state.position
+            currentRoadBlockIndex = getCurrentRoadBlock(pos)
 
-            car_position = interface_state.position
-            currentRoadBlockIndex = getCurrentRoadBlock(car_position)
 
-            if currentRoadBlockIndex is not None and abs(interface_state.yaw_pitch_roll[2]) < 0.1:
-                agent_state = getAgentInputs(interface_state, currentRoadBlockIndex, self.prevSpeed)
+            if currentRoadBlockIndex is not None and abs(tmi_state.yaw_pitch_roll[2]) < 0.1:
+                agent_state = getAgentInputs(tmi_state, currentRoadBlockIndex, self.prevSpeed)
+                self.prevSpeed = agent_state[0]
 
-                self.prevSpeed = agent_state[0] #used for calculating accel
-                reward = -agent_state[3] + agent_state[0] * 15
-                
+                # compute and clip reward
+                raw_r = self.get_reward(pos, currentRoadBlockIndex)
+                if tmi_state.display_speed < 15:
+                    raw_r -= 30
+                reward = raw_r / 30
+
                 print(reward)
-                #Load into shared memory for visualization
-                shared_data[:3] = car_position  # First 3 values for car position [x, y, z]
-                shared_data[3:] = agent_state   # Next 7 values for agent state [a, b, c, d, e, f, g]
 
-                #Calculate experience object based off last iteration's state action
-                if not human:
+                # write to shared memory for visual
+                shared_data[:3] = pos
+                shared_data[3:] = agent_state
+
+                # if we have a previous (s,a), train on that transition
+                if not self.human:
                     if self.expObject is not None:
-                        self.expObject += [reward, agent_state, False]
-                        
-                        #Train short memory
-                        agent.train_short_memory(*self.expObject)
-                        agent.remember(*self.expObject)
+                        s_old, a_old = self.expObject
+                        transition = (s_old, a_old, reward, agent_state, False)
+                        agent.train_short_memory(*transition)
+                        agent.remember(*transition)
+                    
+                    # choose and execute new action
+                    action = agent.get_action(agent_state)
+                    self.expObject = (agent_state, action)
+                    utils.play_action(iface, action)
 
-                    #State action for the current iteration
-                    state_old = agent_state
-                    final_action = agent.get_action(state_old)
-                    self.expObject = [state_old, final_action]
-                    utils.play_action(iface, final_action)
-
-            else: #Died - currentRoadBlockIndex is None
-                if not human:
-                    if self.expObject is not None:
-                        random_state = random.choice(self.states)
-                        random_state.position[0] += random.uniform(-1, 1)  # Add random offset to x
-                        random_state.position[2] += random.uniform(-1, 1)  # Add random offset to z
-                        iface.rewind_to_state(random_state)
-                        self.process_episode() #Train long memory 
-
-
+            else: # died / off-track
+                if self.expObject is not None and not self.human:
+                    last_state, last_action = self.expObject
+                    self.process_terminal(iface, last_state, last_action)
 
 if __name__ == "__main__":
-    server_name = f'TMInterface{sys.argv[1]}' if len(sys.argv) > 1 else 'TMInterface0'
-    print(f'Attempting to connect to {server_name}...')
-    run_client(MainClient(), server_name)
+    server = f"TMInterface{sys.argv[1]}" if len(sys.argv) > 1 else "TMInterface0"
+    print(f"Connecting to {server!r} …")
+    run_client(MainClient(), server)
 
 
-
-def sv():
+def save():
     agent.save_memories()
     agent.target_model.save()
-    print("Saved shit.")

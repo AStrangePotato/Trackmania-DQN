@@ -31,62 +31,59 @@ class Linear_QNet(nn.Module):
 
 class QTrainer:
     def __init__(self, model, target_model, lr, gamma, TAU):
-        self.lr = lr
-        self.gamma = gamma
-        self.TAU = TAU
         self.model = model
         self.target_model = target_model
-        self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        self.gamma = gamma
+        self.TAU = TAU
+        self.optimizer = optim.Adam(model.parameters(), lr=lr)
         self.criterion = nn.SmoothL1Loss()
-        self.episodes = 1
-        
+        self.episodes = 0
+
     def update_target_model(self):
-        target_net_state_dict = self.target_model.state_dict()
-        policy_net_state_dict = self.model.state_dict()
-        for key in policy_net_state_dict:
-            target_net_state_dict[key] = policy_net_state_dict[key]*self.TAU + target_net_state_dict[key]*(1-self.TAU)
-        self.target_model.load_state_dict(target_net_state_dict)
+        td = self.target_model.state_dict()
+        pd = self.model.state_dict()
+        for k in pd:
+            td[k] = pd[k]*self.TAU + td[k]*(1-self.TAU)
+        self.target_model.load_state_dict(td)
 
     def cudafy_tensors(self, state, action, reward, next_state):
-        state = torch.tensor(state, dtype=torch.float).cuda()
-        next_state = torch.tensor(next_state, dtype=torch.float).cuda()
-        action = torch.tensor(action, dtype=torch.long).cuda()
-        reward = torch.tensor(reward, dtype=torch.float).cuda()
-        return state, action, reward, next_state
-    
+        return (torch.tensor(state, dtype=torch.float32).cuda(),
+                torch.tensor(action, dtype=torch.long).cuda(),
+                torch.tensor(reward, dtype=torch.float32).cuda(),
+                torch.tensor(next_state, dtype=torch.float32).cuda())
+
     def train_step(self, state, action, reward, next_state, done):
         state, action, reward, next_state = self.cudafy_tensors(state, action, reward, next_state)
 
-        if len(state.shape) == 1: #add dimension if there is only 1 sample in the batch
-            state = torch.unsqueeze(state, 0)
-            next_state = torch.unsqueeze(next_state, 0)
-            action = torch.unsqueeze(action, 0)
-            reward = torch.unsqueeze(reward, 0)
-            done = (done, )
+        # batchify single samples
+        if state.dim() == 1:
+            state      = state.unsqueeze(0)
+            next_state = next_state.unsqueeze(0)
+            action     = action.unsqueeze(0)
+            reward     = reward.unsqueeze(0)
+            done       = torch.tensor([done], dtype=torch.float32, device=state.device)
+        else:
+            done = torch.tensor(done, dtype=torch.float32, device=state.device)
 
-        # 1: predicted Q values with current state
-        pred_Q = self.model(state)
-        target_Q = pred_Q.clone() #output array
+        # 1) Current Q estimates and clone as targets
+        pred_Q   = self.model(state)                     # (B, n_actions)
+        target_Q = pred_Q.clone().detach()               # (B, n_actions)
 
-        for idx in range(len(done)):
-            Q_new = reward[idx]
-            if not done[idx]:
-                Q_new = reward[idx] + self.gamma * torch.max(self.target_model(next_state[idx]))
+        # 2) Compute Q_new = r + γ * max Q(next) * (1 - done)
+        next_max_Q = self.target_model(next_state).max(dim=1).values  # (B,)
+        Q_new = reward + self.gamma * next_max_Q * (1 - done)         # (B,)
 
-            target_Q[idx][torch.argmax(action[idx]).item()] = Q_new
-    
+        # 3) Insert Q_new into the target Q matrix at the chosen action indices
+        chosen = action.argmax(dim=1)                               # (B,)
+        batch_idx = torch.arange(state.size(0), device=state.device)
+        target_Q[batch_idx, chosen] = Q_new
+
+        # 4) Optimize
         self.optimizer.zero_grad()
-        loss = self.criterion(target_Q, pred_Q)
+        loss = self.criterion(pred_Q, target_Q)
         loss.backward()
-
-        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
         self.optimizer.step()
         self.update_target_model()
-        
+
         loss_plot.append(loss.item())
-        
-
-
-
-
-        
