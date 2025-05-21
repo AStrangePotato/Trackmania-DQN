@@ -5,10 +5,10 @@ import sys, os, numpy as np, pickle, random
 from multiprocessing import shared_memory
 import agent, utils
 
-# shared memory setup (unchanged)
 shm = shared_memory.SharedMemory(create=True, name="tmdata", size=80)
 shared_data = np.ndarray((10,), dtype=np.float64, buffer=shm.buf)
 print("Shared memory created:", shm.name)
+
 
 class MainClient(Client):
     def __init__(self):
@@ -24,6 +24,7 @@ class MainClient(Client):
         self.expObject = None
 
         self.human = False
+        self.visualize = False
 
     def on_registered(self, iface: TMInterface):
         print(f"Registered to {iface.server_name}")
@@ -66,7 +67,6 @@ class MainClient(Client):
             pos = tmi_state.position
             currentRoadBlockIndex = getCurrentRoadBlock(pos)
 
-
             if currentRoadBlockIndex is not None and abs(tmi_state.yaw_pitch_roll[2]) < 0.1:
                 agent_state = getAgentInputs(tmi_state, currentRoadBlockIndex, self.prevSpeed)
                 self.prevSpeed = agent_state[0]
@@ -77,11 +77,10 @@ class MainClient(Client):
                     raw_r -= 30
                 reward = raw_r / 30
 
-                print(reward)
-
                 # write to shared memory for visual
-                shared_data[:3] = pos
-                shared_data[3:] = agent_state
+                if self.visualize:
+                    shared_data[:3] = pos
+                    shared_data[3:] = agent_state
 
                 # if we have a previous (s,a), train on that transition
                 if not self.human:

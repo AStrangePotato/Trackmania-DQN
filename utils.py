@@ -19,10 +19,13 @@ def plot_data(values):
     plt.show()
 
 def play_action(iface, final_action):
-    for i in range(len(action_space)):
-        if final_action[i] == 1:
-            tmi_kwargs = action_space[i]
-            
+    if isinstance(final_action, (list, tuple)) and len(final_action) > 1:
+        for i in range(len(action_space)):
+            if final_action[i] == 1:
+                tmi_kwargs = action_space[i]
+    else:
+        tmi_kwargs = action_space[final_action]
+
     iface.set_input_state(**tmi_kwargs)
 
 

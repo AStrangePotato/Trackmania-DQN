@@ -55,8 +55,10 @@ class QTrainer:
     def train_step(self, state, action, reward, next_state, done):
         state, action, reward, next_state = self.cudafy_tensors(state, action, reward, next_state)
 
+        is_batch = state.dim() > 1  # True if input is batched
+
         # batchify single samples
-        if state.dim() == 1:
+        if not is_batch:
             state      = state.unsqueeze(0)
             next_state = next_state.unsqueeze(0)
             action     = action.unsqueeze(0)
@@ -66,15 +68,15 @@ class QTrainer:
             done = torch.tensor(done, dtype=torch.float32, device=state.device)
 
         # 1) Current Q estimates and clone as targets
-        pred_Q   = self.model(state)                     # (B, n_actions)
-        target_Q = pred_Q.clone().detach()               # (B, n_actions)
+        pred_Q   = self.model(state)
+        target_Q = pred_Q.clone().detach()
 
         # 2) Compute Q_new = r + γ * max Q(next) * (1 - done)
-        next_max_Q = self.target_model(next_state).max(dim=1).values  # (B,)
-        Q_new = reward + self.gamma * next_max_Q * (1 - done)         # (B,)
+        next_max_Q = self.target_model(next_state).max(dim=1).values
+        Q_new = reward + self.gamma * next_max_Q * (1 - done)
 
-        # 3) Insert Q_new into the target Q matrix at the chosen action indices
-        chosen = action.argmax(dim=1)                               # (B,)
+        # 3) Insert Q_new into target Q matrix
+        chosen = action.argmax(dim=1)
         batch_idx = torch.arange(state.size(0), device=state.device)
         target_Q[batch_idx, chosen] = Q_new
 
@@ -86,4 +88,5 @@ class QTrainer:
         self.optimizer.step()
         self.update_target_model()
 
-        loss_plot.append(loss.item())
+        if is_batch:
+            loss_plot.append(loss.item())

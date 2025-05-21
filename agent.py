@@ -8,12 +8,12 @@ from model import *
 from copy import deepcopy
 from utils import plot_data
 
-MAX_MEMORY = 100_000
+MAX_MEMORY = 300_000
 BATCH_SIZE = 64
-MIN_EPSILON = 0.15
+MIN_EPSILON = 0.10
 ACTION_SPACE = 6
 epsilon_decay = 0.999
-epsilon = 0.3
+epsilon = 0.12
 n_games = 0
 
 #plot_data(loss_plot)
@@ -33,7 +33,7 @@ load_memories()
 #memory = deque(maxlen=MAX_MEMORY)
 model = Linear_QNet(7, 64, 64, ACTION_SPACE).cuda()
 target_model = deepcopy(model)
-trainer = QTrainer(model, target_model, lr=0.0005, gamma=0.99, TAU=0.005)
+trainer = QTrainer(model, target_model, lr=0.0002, gamma=0.998, TAU=0.01)
 
 model.load_state_dict(torch.load("model/model.pth"))
 target_model.load_state_dict(torch.load("model/model.pth"))
