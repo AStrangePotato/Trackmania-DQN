@@ -8,7 +8,7 @@ from tminterface.client import Client, run_client
 from trackObservations import getAgentInputs, getCurrentRoadBlock, getClosestCenterlinePoint
 
 import utils
-from agentPPO import PPOAgent
+from ppo import PPOAgent
 
 class PPOClient(Client):
     def __init__(self):

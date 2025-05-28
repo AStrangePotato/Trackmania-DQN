@@ -3,26 +3,61 @@ from utils import *
 
 
 
-def getAgentInputs(state, currentRoadBlockIndex, prevSpeed):
-    a = (state.velocity[0]**2 + state.velocity[2]**2)**0.5
-    b = a - prevSpeed
+def getAgentInputs(state, currentRoadBlockIndex):
+    a = state.display_speed
     c = state.scene_mobil.turning_rate
     d = getDistanceToCenterLine(state, currentRoadBlockIndex)
     e = getAngleToCenterline(state, currentRoadBlockIndex)
     f = getDistanceToNextTurn(state, currentRoadBlockIndex)
     g = getNextTurnDirection(state, currentRoadBlockIndex)
-        
-    # Normalize each feature
-    a = a / 50  # Normalize speed
-    b = b / 50  # Normalize speed difference (change in speed)
-    c = c  # Normalize turning rate
-    d = d / 8  # Normalize distance to centerline
-    e = e / 3.14  # Normalize angle to centerline (between -1 and 1)
-    f = f / 100  # Normalize distance to next turn
-    g = g 
-
-    return [a,b,c,d,e,f,g]
     
+    # Normalize features
+    a /= 130      # speed normalized
+    d /= 8       # distance to centerline normalized
+    e /= 3.14    # angle to centerline normalized (-1 to 1)
+    f /= 100     # distance to next turn normalized
+    
+    return [a, c, d, e, f, g]
+
+import math
+
+def simulate_lidar_raycast(state,
+                           currentRoadBlockIndex,
+                           num_beams=12,
+                           max_range=60.0,
+                           step=0.1):
+    px, _, pz = state.position
+    yaw = state.yaw_pitch_roll[0] % (2 * math.pi)
+
+    beam_angles_deg = [-60.0, -40.0, -20.0, -10.0, -5.0, -2.0,
+                        2.0,  5.0,  10.0, 20.0, 40.0, 60.0]
+    directions = [
+        (math.sin(yaw + math.radians(a)), math.cos(yaw + math.radians(a)))
+        for a in beam_angles_deg
+    ]
+
+    candidates = roadBlocks[currentRoadBlockIndex : currentRoadBlockIndex + 3]
+    half_block = 8.0  # half of 16
+
+    def inside_any_block(x, z):
+        return any(abs(x - cx) <= half_block and abs(z - cz) <= half_block for cx, cz in candidates)
+
+    distances = []
+    for dx, dz in directions:
+        for i in range(1, int(max_range / step) + 1):
+            dist = i * step
+            sx = px + dx * dist
+            sz = pz + dz * dist
+
+            if not inside_any_block(sx, sz):
+                distances.append(dist)
+                break
+        else:
+            distances.append(max_range)
+
+    return distances
+
+
 
 def getCurrentRoadBlock(car_position):
     width = 8
@@ -176,15 +211,11 @@ def getClosestCenterlinePoint(position, roadBlockIndex, return_dist=False):
     px, _, pz = position
     pos2d = (px, pz)
 
-    samples_per_block = int(16 / 0.5)  # 32 samples per block
-    start_idx = max(0, roadBlockIndex * samples_per_block - 10)
-    end_idx   = min(NUM_CL, start_idx + 50)  # scan up to 50 points ahead
-
     closest_dist = float('inf')
-    closest_idx  = start_idx
+    closest_idx  = 0
 
-    for idx in range(start_idx, end_idx):
-        d = dist(pos2d, cl[idx])
+    for idx in range(len(cp)):
+        d = dist(pos2d, cp[idx])
         if d < closest_dist:
             closest_dist = d
             closest_idx  = idx

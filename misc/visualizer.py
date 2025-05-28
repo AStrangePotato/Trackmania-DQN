@@ -1,63 +1,57 @@
 import pygame
-from multiprocessing import shared_memory
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from multiprocessing import shared_memory
+import math
 
-# Shared memory: expects 10 floats [x, y, z, speed, accel, turn_rate, dist_center, angle_center, next_curve_dist, next_curve_dir]
+# === Settings ===
+WIDTH, HEIGHT = 600, 600
+CENTER = (WIDTH // 2, HEIGHT // 2 + 200)
+SCALE = 600  # pixels per meter
+
+# === Connect to shared memory ===
 shm = shared_memory.SharedMemory(name='tmdata')
-data = np.ndarray((10,), dtype=np.float64, buffer=shm.buf)
+# Infer num_beams by dividing shm size by 8 bytes per float64
+num_beams = 12
+data = np.ndarray((num_beams,), dtype=np.float64, buffer=shm.buf)
 
-# Pygame setup
+beam_angles_deg = [-60.0, -40.0, -20.0, -10.0, -5.0, -2.0,
+                        2.0,  5.0,  10.0, 20.0, 40.0, 60.0]
+
+print(num_beams)
+# === Pygame setup ===
 pygame.init()
-W, H, ZOOM, OFFSET = 800, 600, 2.0, 500
-screen = pygame.display.set_mode((W, H))
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("LiDAR Visualizer")
 clock = pygame.time.Clock()
 
-# Visualization buffers
-positions, MAX_POS = [], 2000
-font = pygame.font.SysFont("Arial", 20)
-
-def norm_color(val):  # Normalize & map to colormap
-    color = plt.cm.viridis(Normalize()(val))
-    return tuple(int(c * 255) for c in color[:3]) + (int(color[3] * 180),)
-
-def draw_heatmap():
-    surf = pygame.Surface((W, H), pygame.SRCALPHA)
-    for pos in positions[-MAX_POS:]:
-        x, y = int(pos[0] * ZOOM) - OFFSET, int(pos[1] * ZOOM)
-        pygame.draw.circle(surf, norm_color(np.linalg.norm(pos)), (x, y), 4)
-    screen.blit(surf, (0, 0))
-
-def draw_state(state):
-    labels = ["Speed", "Accel", "Turn", "Dist", "Angle", "NextDist", "NextDir"]
-    base_y = 10
-    for i, (label, val) in enumerate(zip(labels, state)):
-        y = base_y + i * 40
-        text = font.render(f"{label}: {val:.2f}", True, (255, 255, 255))
-        screen.blit(text, (10, y))
-        norm_val = (val + 50) / 100 if label == "Turn" else max(0, min(val, 1))
-        pygame.draw.rect(screen, (50, 50, 50), (150, y + 5, 200, 10))
-        pygame.draw.rect(screen, (0, 255, 0), (150, y + 5, int(norm_val * 200), 10))
-
-# Main loop
 running = True
 while running:
-    for e in pygame.event.get():
-        if e.type == pygame.QUIT:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
             running = False
 
-    screen.fill((0, 0, 0))
-    pos = data[:3]; state = data[3:]
-    positions.append([pos[0], pos[1]])
+    screen.fill((20, 20, 20))
 
-    draw_heatmap()
-    x, y = int(pos[0] * ZOOM) - OFFSET, int(pos[2] * ZOOM)
-    pygame.draw.circle(screen, (255, 0, 0), (x, y), 5)
-    draw_state(state)
+    # Draw origin (car position)
+    pygame.draw.circle(screen, (255, 255, 255), CENTER, 5)
+
+    # Read LiDAR distances
+    lidar = data[:num_beams]
+
+    for i, dist in enumerate(lidar):
+        angle_deg = beam_angles_deg[i]
+        angle_rad = math.radians(angle_deg)
+
+        # Flip X to correct horizontal mirroring consistent with original
+        end_x = CENTER[0] - dist * SCALE * math.sin(angle_rad)
+        end_y = CENTER[1] - dist * SCALE * math.cos(angle_rad)
+
+        color = (255, 100, 100)
+        pygame.draw.line(screen, color, CENTER, (end_x, end_y), 2)
+        pygame.draw.circle(screen, color, (int(end_x), int(end_y)), 3)
 
     pygame.display.flip()
-    clock.tick(20)
+    clock.tick(30)
 
 pygame.quit()
 shm.close()

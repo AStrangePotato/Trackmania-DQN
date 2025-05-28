@@ -9,84 +9,91 @@ loss_plot = []
 class Linear_QNet(nn.Module):
     def __init__(self, input_size, hidden1_size, hidden2_size, output_size):
         super().__init__()
-        self.linear1 = nn.Linear(input_size, hidden1_size)
-        self.linear2 = nn.Linear(hidden1_size, hidden2_size)
-        self.linear3 = nn.Linear(hidden2_size, output_size)
+        self.fc1 = nn.Linear(input_size, hidden1_size)
+        self.fc2 = nn.Linear(hidden1_size, hidden2_size)
+        self.fc3 = nn.Linear(hidden2_size, output_size)
+
+        self.relu = nn.ReLU()
+
+        self._init_weights()
+
+    def _init_weights(self):
+        # He initialization for ReLU networks
+        nn.init.kaiming_uniform_(self.fc1.weight, nonlinearity='relu')
+        nn.init.constant_(self.fc1.bias, 0)
+
+        nn.init.kaiming_uniform_(self.fc2.weight, nonlinearity='relu')
+        nn.init.constant_(self.fc2.bias, 0)
+
+        # Output layer: often use small uniform or zero init
+        nn.init.xavier_uniform_(self.fc3.weight)  # or kaiming if using ReLU here too
+        nn.init.constant_(self.fc3.bias, 0)
 
     def forward(self, x):
-        x = F.relu(self.linear1(x))
-        x = F.relu(self.linear2(x))
-        x = self.linear3(x)
-        return x
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        return self.fc3(x)
 
     def save(self, file_name='model.pth'):
         model_folder_path = './model'
-        if not os.path.exists(model_folder_path):
-            os.makedirs(model_folder_path)
+        os.makedirs(model_folder_path, exist_ok=True)
+        file_path = os.path.join(model_folder_path, file_name)
+        torch.save(self.state_dict(), file_path)
+        print("Saved model at", file_path)
 
-        file_name = os.path.join(model_folder_path, file_name)
-        torch.save(self.state_dict(), file_name)
-        print("Saved model at", file_name)
 
 
 class QTrainer:
-    def __init__(self, model, target_model, lr, gamma, TAU):
+    def __init__(self, model, target_model, lr, gamma, tau=0.01, target_update_interval=100, l2_reg=1e-5):
         self.model = model
         self.target_model = target_model
         self.gamma = gamma
-        self.TAU = TAU
-        self.optimizer = optim.Adam(model.parameters(), lr=lr)
+        self.tau = tau
+        self.episodes = 1
+        self.target_update_interval = target_update_interval
+        self.optimizer = optim.Adam(model.parameters(), lr=lr, eps=1e-5, weight_decay=l2_reg)
         self.criterion = nn.SmoothL1Loss()
-        self.episodes = 0
 
-    def update_target_model(self):
-        td = self.target_model.state_dict()
-        pd = self.model.state_dict()
-        for k in pd:
-            td[k] = pd[k]*self.TAU + td[k]*(1-self.TAU)
-        self.target_model.load_state_dict(td)
-
-    def cudafy_tensors(self, state, action, reward, next_state):
-        return (torch.tensor(state, dtype=torch.float32).cuda(),
-                torch.tensor(action, dtype=torch.long).cuda(),
-                torch.tensor(reward, dtype=torch.float32).cuda(),
-                torch.tensor(next_state, dtype=torch.float32).cuda())
+    def hard_update_target_model(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+        print(f"[Episode {self.episodes}] Hard updated target network.")
 
     def train_step(self, state, action, reward, next_state, done):
-        state, action, reward, next_state = self.cudafy_tensors(state, action, reward, next_state)
+        device = next(self.model.parameters()).device
+        state      = torch.tensor(state, dtype=torch.float32, device=device)
+        next_state = torch.tensor(next_state, dtype=torch.float32, device=device)
+        action     = torch.tensor(action, dtype=torch.int64, device=device)
+        reward     = torch.tensor(reward, dtype=torch.float32, device=device)
+        done       = torch.tensor(done, dtype=torch.float32, device=device)
 
-        is_batch = state.dim() > 1  # True if input is batched
-
-        # batchify single samples
-        if not is_batch:
-            state      = state.unsqueeze(0)
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
             next_state = next_state.unsqueeze(0)
-            action     = action.unsqueeze(0)
-            reward     = reward.unsqueeze(0)
-            done       = torch.tensor([done], dtype=torch.float32, device=state.device)
+            action = action.unsqueeze(0)
+            reward = reward.unsqueeze(0)
+            done = done.unsqueeze(0)
         else:
-            done = torch.tensor(done, dtype=torch.float32, device=state.device)
+            self.episodes += 1
 
-        # 1) Current Q estimates and clone as targets
-        pred_Q   = self.model(state)
-        target_Q = pred_Q.clone().detach()
+        # Q(s,a) prediction
+        pred_Q = self.model(state)  # shape: [batch_size, num_actions]
+        action_indices = action.argmax(dim=1)  # Convert one-hot to indices: [batch_size]
+        current_Q = pred_Q.gather(1, action_indices.unsqueeze(1)).squeeze(1)  # [batch_size]
 
-        # 2) Compute Q_new = r + γ * max Q(next) * (1 - done)
-        next_max_Q = self.target_model(next_state).max(dim=1).values
-        Q_new = reward + self.gamma * next_max_Q * (1 - done)
+        # Double DQN target: use model to select, target to evaluate
+        with torch.no_grad():
+            next_action = self.model(next_state).argmax(dim=1, keepdim=True)  # [batch_size, 1]
+            next_Q = self.target_model(next_state).gather(1, next_action).squeeze(1)  # [batch_size]
+            target_Q = reward + (1 - done) * self.gamma * next_Q
 
-        # 3) Insert Q_new into target Q matrix
-        chosen = action.argmax(dim=1)
-        batch_idx = torch.arange(state.size(0), device=state.device)
-        target_Q[batch_idx, chosen] = Q_new
+        loss = self.criterion(current_Q, target_Q)
 
-        # 4) Optimize
         self.optimizer.zero_grad()
-        loss = self.criterion(pred_Q, target_Q)
         loss.backward()
-        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
-        self.update_target_model()
 
-        if is_batch:
+        if self.episodes % self.target_update_interval == 0:
+            self.hard_update_target_model()
+            print(f"[Episode {self.episodes}] Loss: {loss.item():.4f} | Q(mean): {pred_Q.mean():.3f}, Q(max): {pred_Q.max():.3f}, Q(min): {pred_Q.min():.3f}")
             loss_plot.append(loss.item())
