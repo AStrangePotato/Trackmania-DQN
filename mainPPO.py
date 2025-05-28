@@ -1,133 +1,127 @@
-# ppo_main.py
-
-import sys, random, pickle, numpy as np
-from multiprocessing import shared_memory
-
+import sys, random, pickle
+import numpy as np
+from collections import deque
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackObservations import getAgentInputs, getCurrentRoadBlock, getClosestCenterlinePoint
-
+from trackObservations import getClosestCenterlinePoint, getCurrentRoadBlock, simulate_lidar_raycast
 import utils
-from ppo import PPOAgent
+from ppo import PPO, Memory
+import torch
 
-class PPOClient(Client):
+NUM_BEAMS = 12
+STATE_STACK = 3
+
+class RewardNormalizer:
+    def __init__(self, eps=1e-8):
+        self.rewards = deque(maxlen=10000)
+        self.eps = eps
+
+    def normalize(self, reward):
+        self.rewards.append(reward)
+        mean = np.mean(self.rewards)
+        std = np.std(self.rewards) + self.eps
+        return (reward - mean) / std
+
+reward_norm = RewardNormalizer()
+ppo_agent = PPO(input_dim=1 + NUM_BEAMS * STATE_STACK, action_dim=6)
+memory = Memory()
+update_interval = 128
+
+class MainClient(Client):
     def __init__(self):
         super().__init__()
         with open("states/trainingStates.sim", "rb") as f:
             self.states = pickle.load(f)
 
-        self.prevSpeed = 0.0
         self.prevDistance = 0.0
-
-        self.agent = PPOAgent()
-        try:
-            self.agent.load("model/ppo_model.pth")
-            print("Loaded PPO model weights")
-        except FileNotFoundError:
-            print("No saved model found — starting fresh")
-
-        self.step_count = 0
-        self.episode_num = 0
-        self.episode_reward = 0.0
-
-        self.trajectory_rewards = []
-        self.average_reward = [79.13725490196072, 71.84591194968566, 70.30817610062886, 72.99681020733632, 73.18193384223918, 73.73695420660296, 73.02089009990951, 72.85238095238141, 74.10470085470122, 74.3121387283238, 74.12485481997663, 74.46634615384583, 74.38797814207602, 74.12702828001794, 73.91309987029759, 74.26568867155582, 74.68516377649235, 74.64257028112377, 74.9153659382583, 75.15676567656746, 75.2429378531074, 75.38479952124504, 75.42009132420141, 75.77019994522115, 75.48964070285949, 75.1814058956926, 75.13828238719182, 75.14382759428565, 75.11284134507024, 75.19812145041654, 75.06881992822623, 75.34545828195814, 75.20995024875803, 75.08309234625214, 75.05486891385941, 74.81677583697375, 74.72720835546225, 74.62017906336169, 74.78890006706962, 74.6916421808687, 74.68579626972743, 74.74096573208703, 74.7835082914951, 74.74204579244659, 74.8158813263517, 74.79060193072014, 74.71003614122759, 74.83775690757993, 74.6666666666651, 74.58401880140838, 74.88161273754308, 74.8620559334825, 74.79681127178131, 74.91229348882182, 75.00381770460268, 75.15715292459225, 75.0917790845125, 75.21533923303556, 75.37913315459944, 75.29249011857408, 75.53233830845461, 75.50026615564462, 75.60285025672938, 75.58317872603246, 75.62071414079584, 75.77737773777018, 75.67907434760832, 75.74379123010876, 75.6090900410543, 75.61725955203883, 75.64633806738769, 75.51872146118457, 75.4670993329704, 75.66078431372337, 75.70942201108288, 75.66146104459328, 75.59400941377709, 75.49670719351472, 75.49837459364768, 75.561455503416, 75.64467253176903, 75.70338164251204, 75.5308230060377, 75.50125490196125, 75.34261192298844, 75.27931851172836, 75.36007251303084, 75.4153777180018, 75.4768241295203, 75.48686425173975, 75.55393860411428, 75.60344086021715, 75.53161775131377, 75.62076226574261, 75.53687500000264, 75.66914242487042, 75.6805583929209, 75.58505050505364, 75.54049190162299, 75.52881758764458, 75.63330716902506, 75.73165985600686, 75.75152684024818, 75.78868308828612, 75.78681803847783, 75.79178390546294, 75.75048008425148, 75.65618487189377, 75.64644808743644, 75.54171174420492, 75.51640759931418, 75.5194828197005, 75.60500117123973, 75.4853546778083, 75.5368390804653, 75.52839970375999, 75.52412429379108, 75.47866263441448, 75.45610528069898, 75.41996917658031, 75.41900081900704, 75.40107212476266, 75.43132517182774, 75.4628948910619, 75.36828212438634, 75.45405462075423, 75.51297654340935, 75.52226177578984, 75.50066543817248, 75.53261145849932, 75.62850219597874, 75.61301472799047, 75.58524704245694, 75.57466844155954, 75.55402163803568, 75.55132691747632, 75.57486243846705, 75.64278521076874, 75.67738554619385, 75.61746774422933, 75.6158573774404, 75.60550202486318, 75.57313749942864, 75.60281638457518, 75.63167008430703, 75.56878450539017, 75.63010926750782, 75.68838539572334, 75.71755250655369, 75.7352305316607, 75.68913710031028, 75.6193085453393, 75.60251425609432, 75.68547867543126, 75.6818976918836, 75.70863538090018, 75.79459277067988, 75.7968828557082, 75.78882504788231, 75.80941741145448, 75.83722078242734, 75.9160224158392, 75.9531478770138, 75.98515732427445, 75.94619897139198, 76.01070886278264, 76.03947734222933, 76.10267045903402, 76.15393682225294, 76.14521800281202, 76.15583003184845, 76.16075704905234, 76.19335254562765, 76.20533088937081, 76.20773056915927, 76.19573182247184, 76.18469280456422, 76.19008665769948, 76.16299019607563, 76.19830101569414, 76.12862019601043, 76.17099448522359, 76.19031531531174, 76.23024390243525, 76.26410007548402, 76.33254649498872, 76.37457741716946, 76.33803913243013, 76.39097214886333, 76.46340865299919, 76.50662067042498, 76.53126733221887, 76.50460233736146, 76.45629736309151, 76.47911547910977, 76.50405841398631, 76.46026277568888, 76.49208270296909, 76.52044025156596, 76.5395810437208, 76.59447096260271, 76.6159836335971, 76.63277170163852, 76.57658629026275, 76.57699938204627, 76.61984327439191, 76.6880461771554, 76.71057615149287, 76.7162114678088, 76.74298069890136, 76.76819577673548, 76.78059311082973, 76.79967993974498, 76.82477350827014, 76.85824934676253, 76.89369017748402, 76.89648262892538, 76.87966372114951, 76.92028852618436, 76.96408242777508, 76.94335907919698, 76.96776139207101, 76.97180942086754, 77.00011958145505, 77.02111061484788, 77.02223408038837, 77.08665603401428, 77.164415807670148, 77.25140882959815, 77.22298325721836, 77.24291929823403, 77.20866163731715, 77.19688874045681, 77.2205038662889, 77.24627236579313, 77.30370553766221, 77.31984870908167, 77.31362916870115, 77.31748620510321, 77.34348850433386, 77.34509359657795, 77.37945492661198, 77.3466088539029, 77.32035601032625, 77.35972808623458, 77.37511245169875, 77.39772187943622, 77.37950051207993, 77.41576385616493, 77.43279885280879, 77.42285922001025, 77.42145831715344, 77.42341088865176, 77.43216531894386, 77.4468493360824, 77.46478478170766, 77.50855124391865, 77.5667350609073, 77.5646752984385, 77.5973941040202, 77.57789637200392, 77.61063250678991, 77.60890116176355, 77.64018645242994, 77.65377013537402, 77.63698343546253, 77.64444444443018, 77.6682065947894, 77.69787327339131, 77.67744205798937, 77.70324672181405, 77.73741831246166, 77.72770731237351, 77.78090721845798, 77.80127929732936, 77.81819046938159, 77.81239924133541, 77.84979321752424, 77.85804475852882, 77.8740052116243, 77.87810526314787, 77.87442890441919]
+        self.expObject = None
+        self.lidar_history = deque(maxlen=STATE_STACK)
+        self.warming = STATE_STACK
 
     def on_registered(self, iface: TMInterface):
-        print(f"✅ Registered to {iface.server_name}")
+        print(f"Connected to {iface.server_name}")
 
-    def get_reward(self, pos, block_idx, speed):
-        curr_dist = getClosestCenterlinePoint(pos, block_idx)
-        progress_reward = curr_dist - self.prevDistance  # Δdistance
-        speed_penalty = -1.0 if speed < 15.0 else 0.0     # Optional shaping
-        reward = progress_reward + speed_penalty
-        self.prevDistance = curr_dist
+    def get_reward(self, position, block):
+        curr = getClosestCenterlinePoint(position, block)
+        reward = curr - self.prevDistance
+        self.prevDistance = curr
+        return reward_norm.normalize(reward)
 
-        return reward
+    def process_terminal(self, iface, state, action, reward, logp, value):
+        memory.store(state, action, logp, reward, True, value)
+
+        if len(memory.states) >= update_interval:
+            with torch.no_grad():
+                last_value = torch.tensor(0.0).cuda()
+            memory.returns = ppo_agent.compute_gae(memory.rewards, memory.dones, memory.values, last_value.item())
+            ppo_agent.update(memory)
+            print(f"[Update] Steps: {len(memory.states)}, Avg Reward: {np.mean(memory.rewards):.4f}")
+            memory.clear()
+
+        new_state = random.choice(self.states)
+        new_state.position[0] += random.uniform(-1, 1)
+        new_state.position[2] += random.uniform(-1, 1)
+        iface.rewind_to_state(new_state)
+        self.prevDistance = getClosestCenterlinePoint(new_state.position, getCurrentRoadBlock(new_state.position))
+        self.expObject = None
+        self.lidar_history.clear()
+        self.warming = STATE_STACK
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 100 != 0:
-            return
+        if _time > 0 and _time % 80 == 0:
+            tmi_state = iface.get_simulation_state()
+            pos = tmi_state.position
+            block = getCurrentRoadBlock(pos)
 
-        sim = iface.get_simulation_state()
-        pos = sim.position
-        block_idx = getCurrentRoadBlock(pos)
+            if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.15:
+                if self.expObject:
+                    self.process_terminal(iface, *self.expObject, -10.0)
+                return
 
-        if block_idx is not None and abs(sim.yaw_pitch_roll[2]) < 0.1:
-            state = getAgentInputs(sim, block_idx, self.prevSpeed)
-            self.prevSpeed = state[0]
+            lidar = simulate_lidar_raycast(tmi_state, block, NUM_BEAMS)
+            lidar = np.array(lidar) / 60.0
+            self.lidar_history.append(lidar)
 
-            action, logp, entropy, value = self.agent.get_action(state)
+            if self.warming > 0:
+                self.warming -= 1
+                return
 
-            if self.step_count > 0:
-                r = self.get_reward(pos, block_idx, sim.display_speed)
-                self.episode_reward += r
+            stacked = np.concatenate(self.lidar_history)
+            speed = tmi_state.display_speed * (-1 if tmi_state.scene_mobil.engine.rear_gear else 1)
+            speed /= 60.0
+            agent_input = torch.tensor(np.concatenate(([speed], stacked)), dtype=torch.float32).cuda()
 
-                self.agent.remember((self.last_state,
-                                     self.last_action,
-                                     self.last_logp,
-                                     r,
-                                     self.last_value,
-                                     False))
+            reward = self.get_reward(pos, block)
 
-            utils.play_action(iface, action)
+            if self.expObject:
+                state, action, logp, value = self.expObject
+                memory.store(state, action, logp, reward, False, value)
 
-            self.last_state  = state
-            self.last_action = action
-            self.last_logp   = logp
-            self.last_value  = value
-            self.step_count += 1
+            if len(memory.states) >= update_interval:
+                with torch.no_grad():
+                    last_value = ppo_agent.model(agent_input.unsqueeze(0))[1].item()
+                memory.returns = ppo_agent.compute_gae(memory.rewards, memory.dones, [v.item() for v in memory.values], last_value)
+                ppo_agent.update(memory)
+                print(f"[Update] Steps: {len(memory.states)}, Avg Reward: {np.mean(memory.rewards):.4f}")
+                memory.clear()
 
-        else:
-            if self.step_count > 0:
-                r = -10.0 / 30.0
-                self.episode_reward += r
-                self.agent.remember((self.last_state,
-                                     self.last_action,
-                                     self.last_logp,
-                                     r,
-                                     self.last_value,
-                                     True))
+            with torch.no_grad():
+                action, logp, value = ppo_agent.act(agent_input.unsqueeze(0))
 
-                self.episode_num += 1
-                self.trajectory_rewards.append(self.episode_reward)
-                print(f"Trajectory #{self.episode_num} | Steps: {self.step_count} | Total Reward: {round(self.episode_reward)}")
+            self.expObject = (agent_input, action, logp, value)
+            utils.play_action(iface, action.item())
 
-                if self.agent.ready_to_train():
-                    self.average_reward.append(sum(self.trajectory_rewards) / len(self.trajectory_rewards))
-                    self.agent.train()
-                    self.agent.save("model/ppo_model.pth")
+        elif _time > 0 and self.expObject:
+            tmi_state = iface.get_simulation_state()
+            pos = tmi_state.position
+            block = getCurrentRoadBlock(pos)
+            if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.15:
+                self.process_terminal(iface, *self.expObject, -10.0)
 
-            
-            self.reset_episode(iface)
-
-    def reset_episode(self, iface: TMInterface):
-        self.step_count = 0
-        self.episode_reward = 0.0
-        self.prevSpeed = 0.0
-
-        state = random.choice(self.states)
-        state.position[0] += random.uniform(-1, 1)
-        state.position[2] += random.uniform(-1, 1)
-        iface.rewind_to_state(state)
-
-        block_idx = getCurrentRoadBlock(state.position)
-        self.prevDistance = getClosestCenterlinePoint(state.position, block_idx)
-
-
-    def plot(self):
-        import matplotlib.pyplot as plt
-        if len(self.average_reward) > 0:
-            plt.plot(self.average_reward)
-            plt.title("Average Reward Over Episodes")
-            plt.xlabel("Episode")
-            plt.ylabel("Average Reward")
-            plt.grid()
-            plt.show()
-
-            
 if __name__ == "__main__":
     server = f"TMInterface{sys.argv[1]}" if len(sys.argv) > 1 else "TMInterface0"
-    print(f"🔗 Connecting to {server!r}…")
-    client = PPOClient()
-    run_client(client, server)
+    print(f"Connecting to {server}...")
+    try:
+        run_client(MainClient(), server)
+    finally:
+        print("Client shut down.")

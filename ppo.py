@@ -1,101 +1,110 @@
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
-import numpy as np
+import torch.optim as optim
+from torch.distributions import Categorical
+
+
+class ActorCritic(nn.Module):
+    def __init__(self, input_dim, action_dim):
+        super().__init__()
+        self.shared = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+        )
+        self.actor = nn.Linear(128, action_dim)
+        self.critic = nn.Linear(128, 1)
+
+    def forward(self, x):
+        features = self.shared(x)
+        return self.actor(features), self.critic(features)
+
 
 class Memory:
     def __init__(self):
+        self.clear()
+
+    def clear(self):
         self.states = []
         self.actions = []
         self.log_probs = []
         self.rewards = []
         self.dones = []
         self.values = []
+        self.returns = []
 
-    def clear(self):
-        self.__init__()
+    def store(self, state, action, log_prob, reward, done, value):
+        self.states.append(state)
+        self.actions.append(action)
+        self.log_probs.append(log_prob)
+        self.rewards.append(reward)
+        self.dones.append(done)
+        self.values.append(value)
 
-class ActorCritic(nn.Module):
-    def __init__(self, action_dim):
-        super(ActorCritic, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(4, 32, 8, stride=4), nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1), nn.ReLU()
-        )
-        self._init_conv_output()
-        self.fc = nn.Sequential(
-            nn.Linear(self.conv_output_size, 512),
-            nn.ReLU()
-        )
-        self.actor_mean = nn.Linear(512, action_dim)
-        self.actor_log_std = nn.Parameter(torch.zeros(action_dim))
-        self.critic = nn.Linear(512, 1)
-
-    def _init_conv_output(self):
-        with torch.no_grad():
-            sample_input = torch.zeros(1, 4, 96, 96)
-            conv_out = self.conv(sample_input)
-            self.conv_output_size = conv_out.view(1, -1).size(1)
-
-    def forward(self, x):
-        x = x / 255.0
-        x = self.conv(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        return x
-
-    def act(self, state):
-        x = self.forward(state)
-        mean = self.actor_mean(x)
-        std = self.actor_log_std.exp()
-        dist = Normal(mean, std)
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=1)
-        value = self.critic(x).squeeze(1)
-        return action, log_prob, value
-
-    def evaluate(self, states, actions):
-        x = self.forward(states)
-        mean = self.actor_mean(x)
-        std = self.actor_log_std.exp()
-        dist = Normal(mean, std)
-        log_probs = dist.log_prob(actions).sum(dim=1)
-        entropy = dist.entropy().sum(dim=1)
-        values = self.critic(x).squeeze(1)
-        return log_probs, entropy, values
 
 class PPO:
-    def __init__(self, action_dim, lr=2.5e-4, gamma=0.99, eps_clip=0.2, k_epochs=4):
-        self.policy = ActorCritic(action_dim).cuda()
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
+    def __init__(self, input_dim, action_dim, lr=2.5e-4, gamma=0.99, gae_lambda=0.95, eps_clip=0.2, epochs=4, batch_size=64):
         self.gamma = gamma
+        self.gae_lambda = gae_lambda
         self.eps_clip = eps_clip
-        self.k_epochs = k_epochs
+        self.epochs = epochs
+        self.batch_size = batch_size
 
-    def compute_returns(self, rewards, dones, last_value):
+        self.model = ActorCritic(input_dim, action_dim).cuda()
+        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+
+    def act(self, state):
+        logits, value = self.model(state)
+        dist = Categorical(logits=logits)
+        action = dist.sample()
+        return action, dist.log_prob(action), value.squeeze(-1)
+
+    def evaluate(self, states, actions):
+        logits, values = self.model(states)
+        dist = Categorical(logits=logits)
+        log_probs = dist.log_prob(actions)
+        entropy = dist.entropy()
+        return log_probs, entropy, values.squeeze(-1)
+
+    def compute_gae(self, rewards, dones, values, next_value):
+        gae = 0
         returns = []
-        R = last_value
-        for r, d in zip(reversed(rewards), reversed(dones)):
-            R = r + self.gamma * R * (1 - d)
-            returns.insert(0, R)
+        values = values + [next_value]
+        for step in reversed(range(len(rewards))):
+            delta = rewards[step] + self.gamma * values[step + 1] * (1 - dones[step]) - values[step]
+            gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
+            returns.insert(0, gae + values[step])
         return returns
 
     def update(self, memory):
         states = torch.stack(memory.states).cuda()
-        actions = torch.stack(memory.actions).cuda()
-        old_log_probs = torch.stack(memory.log_probs).cuda()
+        actions = torch.tensor(memory.actions).cuda()
+        old_log_probs = torch.stack(memory.log_probs).cuda().detach()
         returns = torch.tensor(memory.returns).cuda()
-        values = torch.stack(memory.values).cuda()
+        values = torch.stack(memory.values).cuda().detach()
+
         advantages = returns - values
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        for _ in range(self.k_epochs):
-            log_probs, entropy, new_values = self.policy.evaluate(states, actions)
-            ratios = torch.exp(log_probs - old_log_probs)
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            loss = -torch.min(surr1, surr2).mean() + 0.5 * (returns - new_values).pow(2).mean() - 0.01 * entropy.mean()
+        for _ in range(self.epochs):
+            indices = torch.randperm(len(states))
+            for i in range(0, len(states), self.batch_size):
+                idx = indices[i:i + self.batch_size]
+                batch_states = states[idx]
+                batch_actions = actions[idx]
+                batch_old_log_probs = old_log_probs[idx]
+                batch_returns = returns[idx]
+                batch_advantages = advantages[idx]
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+                log_probs, entropy, values = self.evaluate(batch_states, batch_actions)
+                ratio = (log_probs - batch_old_log_probs).exp()
+                surr1 = ratio * batch_advantages
+                surr2 = torch.clamp(ratio, 1 - self.eps_clip, 1 + self.eps_clip) * batch_advantages
+                actor_loss = -torch.min(surr1, surr2).mean()
+                critic_loss = (batch_returns - values).pow(2).mean()
+                loss = actor_loss + 0.5 * critic_loss - 0.01 * entropy.mean()
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
