@@ -1,127 +1,133 @@
 import sys, random, pickle
 import numpy as np
+import torch
+import os
 from collections import deque
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackObservations import getClosestCenterlinePoint, getCurrentRoadBlock, simulate_lidar_raycast
+from trackObservations import *
 import utils
 from ppo import PPO, Memory
-import torch
 
 NUM_BEAMS = 12
 STATE_STACK = 3
-
-class RewardNormalizer:
-    def __init__(self, eps=1e-8):
-        self.rewards = deque(maxlen=10000)
-        self.eps = eps
-
-    def normalize(self, reward):
-        self.rewards.append(reward)
-        mean = np.mean(self.rewards)
-        std = np.std(self.rewards) + self.eps
-        return (reward - mean) / std
-
-reward_norm = RewardNormalizer()
-ppo_agent = PPO(input_dim=1 + NUM_BEAMS * STATE_STACK, action_dim=6)
-memory = Memory()
-update_interval = 128
+UPDATE_INTERVAL = 2048
 
 class MainClient(Client):
     def __init__(self):
         super().__init__()
+        self.ppo_agent = PPO(input_dim=3 + NUM_BEAMS * STATE_STACK, action_dim=8)
+        self.memory = Memory()
         with open("states/trainingStates.sim", "rb") as f:
             self.states = pickle.load(f)
 
         self.prevDistance = 0.0
-        self.expObject = None
         self.lidar_history = deque(maxlen=STATE_STACK)
         self.warming = STATE_STACK
+        self.last_state = None
+        self.last_action = None
+        self.last_logp = None
+        self.last_value = None
+        self.rb_guess = 0
 
     def on_registered(self, iface: TMInterface):
         print(f"Connected to {iface.server_name}")
+        iface.set_timeout(5000)
 
-    def get_reward(self, position, block):
+    def get_reward(self,position, block):
         curr = getClosestCenterlinePoint(position, block)
         reward = curr - self.prevDistance
         self.prevDistance = curr
-        return reward_norm.normalize(reward)
+        return reward
 
-    def process_terminal(self, iface, state, action, reward, logp, value):
-        memory.store(state, action, logp, reward, True, value)
-
-        if len(memory.states) >= update_interval:
-            with torch.no_grad():
-                last_value = torch.tensor(0.0).cuda()
-            memory.returns = ppo_agent.compute_gae(memory.rewards, memory.dones, memory.values, last_value.item())
-            ppo_agent.update(memory)
-            print(f"[Update] Steps: {len(memory.states)}, Avg Reward: {np.mean(memory.rewards):.4f}")
-            memory.clear()
+    def reset_episode(self, iface, terminal_reward):
+        if self.last_state is not None:
+            self.memory.store(self.last_state, self.last_action, self.last_logp, terminal_reward, True, self.last_value)
 
         new_state = random.choice(self.states)
         new_state.position[0] += random.uniform(-1, 1)
         new_state.position[2] += random.uniform(-1, 1)
         iface.rewind_to_state(new_state)
         self.prevDistance = getClosestCenterlinePoint(new_state.position, getCurrentRoadBlock(new_state.position))
-        self.expObject = None
         self.lidar_history.clear()
         self.warming = STATE_STACK
+        self.last_state = self.last_action = self.last_logp = self.last_value = None
 
     def on_run_step(self, iface: TMInterface, _time: int):
         if _time > 0 and _time % 80 == 0:
             tmi_state = iface.get_simulation_state()
             pos = tmi_state.position
-            block = getCurrentRoadBlock(pos)
+            block = getCurrentRoadBlock(pos, self.rb_guess)
 
-            if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.15:
-                if self.expObject:
-                    self.process_terminal(iface, *self.expObject, -10.0)
+            if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.1:
+                self.reset_episode(iface, -100.0)
                 return
+            
+            self.rb_guess = block
 
-            lidar = simulate_lidar_raycast(tmi_state, block, NUM_BEAMS)
-            lidar = np.array(lidar) / 60.0
+            lidar = np.array(simulate_lidar_raycast(tmi_state, block, NUM_BEAMS)) / 60.0
             self.lidar_history.append(lidar)
 
             if self.warming > 0:
                 self.warming -= 1
+                iface.set_input_state(**{'left': False, 'right': False, 'accelerate': False})
                 return
 
             stacked = np.concatenate(self.lidar_history)
-            speed = tmi_state.display_speed * (-1 if tmi_state.scene_mobil.engine.rear_gear else 1)
-            speed /= 60.0
-            agent_input = torch.tensor(np.concatenate(([speed], stacked)), dtype=torch.float32).cuda()
+            speed = tmi_state.display_speed * (-1 if tmi_state.scene_mobil.engine.rear_gear else 1) / 60.0
+            turning_rate = tmi_state.scene_mobil.turning_rate
 
-            reward = self.get_reward(pos, block)
+            next_turn = getNextTurnDirection(block)
+            state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn], stacked)), dtype=torch.float32).cuda()
 
-            if self.expObject:
-                state, action, logp, value = self.expObject
-                memory.store(state, action, logp, reward, False, value)
+            reward = self.get_reward(pos, block) * 10
+            reward += speed - 0.5
 
-            if len(memory.states) >= update_interval:
+            if self.last_state is not None:
+                self.memory.store(self.last_state, self.last_action, self.last_logp, reward, False, self.last_value)
+
+            if len(self.memory.states) >= UPDATE_INTERVAL:
                 with torch.no_grad():
-                    last_value = ppo_agent.model(agent_input.unsqueeze(0))[1].item()
-                memory.returns = ppo_agent.compute_gae(memory.rewards, memory.dones, [v.item() for v in memory.values], last_value)
-                ppo_agent.update(memory)
-                print(f"[Update] Steps: {len(memory.states)}, Avg Reward: {np.mean(memory.rewards):.4f}")
-                memory.clear()
+                    last_value = self.ppo_agent.get_value(state_tensor).item()
+                self.memory.returns = self.ppo_agent.compute_gae(self.memory.rewards, self.memory.dones, self.memory.values, last_value)
+                self.ppo_agent.update(self.memory)
+                print(f"[Update] Total Steps: {self.ppo_agent.global_step}, Avg Reward: {np.mean(self.memory.rewards):.4f}")
+                # Save checkpoint every 10 updates
+                if self.ppo_agent.global_step % (UPDATE_INTERVAL * 10) == 0:
+                    self.ppo_agent.save_checkpoint()
+                self.memory.clear()
 
             with torch.no_grad():
-                action, logp, value = ppo_agent.act(agent_input.unsqueeze(0))
+                action, logp, value = self.ppo_agent.act(state_tensor.unsqueeze(0))
 
-            self.expObject = (agent_input, action, logp, value)
+            self.last_state = state_tensor
+            self.last_action = action
+            self.last_logp = logp
+            self.last_value = value
             utils.play_action(iface, action.item())
 
-        elif _time > 0 and self.expObject:
+        elif _time > 0 and self.last_state is not None:
             tmi_state = iface.get_simulation_state()
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos)
             if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.15:
-                self.process_terminal(iface, *self.expObject, -10.0)
+                self.reset_episode(iface, -100.0)
 
-if __name__ == "__main__":
+def main():
     server = f"TMInterface{sys.argv[1]}" if len(sys.argv) > 1 else "TMInterface0"
     print(f"Connecting to {server}...")
-    try:
-        run_client(MainClient(), server)
-    finally:
-        print("Client shut down.")
+
+    # Load latest checkpoint if available
+    checkpoint_dir = "checkpoints"
+    client = MainClient()
+    if os.path.exists(checkpoint_dir):
+        checkpoints = [f for f in os.listdir(checkpoint_dir) if f.endswith('.pth')]
+        if checkpoints:
+            latest_checkpoint = max(checkpoints, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+            checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
+            client.ppo_agent.load_checkpoint(checkpoint_path)
+
+    run_client(client, server)
+
+if __name__ == "__main__":
+    main()

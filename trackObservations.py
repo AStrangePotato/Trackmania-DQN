@@ -9,7 +9,7 @@ def getAgentInputs(state, currentRoadBlockIndex):
     d = getDistanceToCenterLine(state, currentRoadBlockIndex)
     e = getAngleToCenterline(state, currentRoadBlockIndex)
     f = getDistanceToNextTurn(state, currentRoadBlockIndex)
-    g = getNextTurnDirection(state, currentRoadBlockIndex)
+    g = getNextTurnDirection(currentRoadBlockIndex)
     
     # Normalize features
     a /= 130      # speed normalized
@@ -25,7 +25,7 @@ def simulate_lidar_raycast(state,
                            currentRoadBlockIndex,
                            num_beams=12,
                            max_range=60.0,
-                           step=0.1):
+                           step=0.2):
     px, _, pz = state.position
     yaw = state.yaw_pitch_roll[0] % (2 * math.pi)
 
@@ -59,14 +59,33 @@ def simulate_lidar_raycast(state,
 
 
 
-def getCurrentRoadBlock(car_position):
+def getCurrentRoadBlock(car_position, guess=0):
     width = 8
-    for i in range(len(roadBlocks)):
-        if roadBlocks[i][0] - width < car_position[0] < roadBlocks[i][0] + width: # x
-            if roadBlocks[i][1] - width < car_position[2] < roadBlocks[i][1] + width: # z
-                return i
+    n = len(roadBlocks)
+    
+    # Check the guess index first
+    if 0 <= guess < n:
+        if roadBlocks[guess][0] - width < car_position[0] < roadBlocks[guess][0] + width:  # x
+            if roadBlocks[guess][1] - width < car_position[2] < roadBlocks[guess][1] + width:  # z
+                return guess
+    
+    # Alternate checking one forward and one backward from guess
+    for offset in range(1, n):
+        # Check backward index (guess - offset)
+        backward = guess - offset
+        if backward >= 0:
+            if roadBlocks[backward][0] - width < car_position[0] < roadBlocks[backward][0] + width:  # x
+                if roadBlocks[backward][1] - width < car_position[2] < roadBlocks[backward][1] + width:  # z
+                    return backward
+        
+        # Check forward index (guess + offset)
+        forward = guess + offset
+        if forward < n:
+            if roadBlocks[forward][0] - width < car_position[0] < roadBlocks[forward][0] + width:  # x
+                if roadBlocks[forward][1] - width < car_position[2] < roadBlocks[forward][1] + width:  # z
+                    return forward
 
-    #not on a road block
+    # No roadblock found
     return None
 
 def getCenterlineEndblock(currentRoadBlockIndex):
@@ -131,7 +150,7 @@ def getAngleToCenterline(state, currentRoadBlockIndex):
     else:
         return angle_to_centerline - 2*pi
 
-def getNextTurnDirection(state, currentRoadBlockIndex):
+def getNextTurnDirection(currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
     centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
 
@@ -214,7 +233,7 @@ def getClosestCenterlinePoint(position, roadBlockIndex, return_dist=False):
     closest_dist = float('inf')
     closest_idx  = 0
 
-    for idx in range(len(cp)):
+    for idx in range(NUM_CP):
         d = dist(pos2d, cp[idx])
         if d < closest_dist:
             closest_dist = d
