@@ -61,7 +61,7 @@ def simulate_lidar_raycast(state,
 
 def getCurrentRoadBlock(car_position, guess=0):
     width = 8
-    n = len(roadBlocks)
+    n = NUM_BLOCKS
     
     # Check the guess index first
     if 0 <= guess < n:
@@ -154,6 +154,9 @@ def getNextTurnDirection(currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
     centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
 
+    if centerline_end_block == roadBlocks[-1]:
+        return 1
+    
     #Case 1: road continues in the x direction -> z stays the same
     if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
         if centerline_end_block[0] > currentBlockCenter[0]: #if the road continues +x direction

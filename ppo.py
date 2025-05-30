@@ -36,7 +36,7 @@ class Memory:
 
 class PPO(nn.Module):
     def __init__(self, input_dim, action_dim, learning_rate=2e-4, gamma=0.99, gae_lambda=0.95, 
-                 clip_coef=0.2, ent_coef=0.03, vf_coef=0.5, max_grad_norm=0.5, 
+                 clip_coef=0.2, ent_coef=0.02, vf_coef=0.5, max_grad_norm=0.5, 
                  update_epochs=4, minibatch_size=256, norm_adv=True, clip_vloss=True):
         super(PPO, self).__init__()
         self.input_dim = input_dim
