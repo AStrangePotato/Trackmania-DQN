@@ -88,8 +88,8 @@ class MainClient(Client):
                 self.memory.store(self.last_state, self.last_action, self.last_logp, reward, False, self.last_value)
             
             #finish race
-            if block >= 919:
-                self.reset_episode(iface, self.ppo_agent.get_value(state_tensor))
+            if block >= 918:
+                self.reset_episode(iface, int(self.ppo_agent.get_value(state_tensor).cpu().item()))
 
             if len(self.memory.states) >= UPDATE_INTERVAL:
                 with torch.no_grad():
