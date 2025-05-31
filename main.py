@@ -16,7 +16,7 @@ UPDATE_INTERVAL = 2048
 class MainClient(Client):
     def __init__(self):
         super().__init__()
-        self.ppo_agent = PPO(input_dim=3 + NUM_BEAMS * STATE_STACK, action_dim=8)
+        self.ppo_agent = PPO(input_dim=5 + NUM_BEAMS * STATE_STACK, action_dim=8)
         self.memory = Memory()
         with open("states/states.sim", "rb") as f:
             self.states = pickle.load(f)
@@ -32,7 +32,8 @@ class MainClient(Client):
 
     def on_registered(self, iface: TMInterface):
         print(f"Connected to {iface.server_name}")
-        new_state = iface.get_simulation_state()
+        new_state = random.choice(self.states)
+        iface.rewind_to_state(new_state)
         self.prevDistance = getClosestCenterlinePoint(new_state.position, getCurrentRoadBlock(new_state.position))
         iface.set_timeout(5000)
 
@@ -55,13 +56,13 @@ class MainClient(Client):
         self.last_state = self.last_action = self.last_logp = self.last_value = None
 
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 80 == 0:
+        if _time > 0 and _time % 60 == 0:
             tmi_state = iface.get_simulation_state()
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos, self.rb_guess)
 
             if block is None:
-                self.reset_episode(iface, -100.0)
+                self.reset_episode(iface, -1)
                 return
 
             self.rb_guess = block
@@ -77,12 +78,13 @@ class MainClient(Client):
             stacked = np.concatenate(self.lidar_history)
             speed = tmi_state.display_speed * (-1 if tmi_state.scene_mobil.engine.rear_gear else 1) / 60.0
             turning_rate = tmi_state.scene_mobil.turning_rate
-
+            dist_to_next = (getDistanceToNextTurn(tmi_state, block) - 8) / 160 * 2 - 1
             next_turn = getNextTurnDirection(block)
-            state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn], stacked)), dtype=torch.float32).cuda()
+            next_next_turn = getNextTurnDirection(getCenterlineEndblock(block, retIndex=True))
+            state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn, next_next_turn, dist_to_next], stacked)), dtype=torch.float32).cuda()
 
-            reward = self.get_reward(pos, block) * 10
-            reward += speed - 0.5
+            reward = self.get_reward(pos, block)
+            reward -= 0.01 #timestep penalty
 
             if self.last_state is not None:
                 self.memory.store(self.last_state, self.last_action, self.last_logp, reward, False, self.last_value)

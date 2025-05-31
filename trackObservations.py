@@ -88,7 +88,7 @@ def getCurrentRoadBlock(car_position, guess=0):
     # No roadblock found
     return None
 
-def getCenterlineEndblock(currentRoadBlockIndex):
+def getCenterlineEndblock(currentRoadBlockIndex, retIndex=False):
     nextCorner = currentRoadBlockIndex + 1
     centerline_end_block = roadBlocks[-1]
     while nextCorner < NUM_BLOCKS:
@@ -98,6 +98,8 @@ def getCenterlineEndblock(currentRoadBlockIndex):
         else:
             nextCorner += 1
 
+    if retIndex:
+        return nextCorner
     return centerline_end_block
 
 def getLateralVelocity(state, turning_rate):
@@ -151,39 +153,40 @@ def getAngleToCenterline(state, currentRoadBlockIndex):
         return angle_to_centerline - 2*pi
 
 def getNextTurnDirection(currentRoadBlockIndex):
-    currentBlockCenter = roadBlocks[currentRoadBlockIndex]
-    centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
+    try:
+        currentBlockCenter = roadBlocks[currentRoadBlockIndex]
+        centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
 
-    if centerline_end_block == roadBlocks[-1]:
-        return 1
+        #Case 1: road continues in the x direction -> z stays the same
+        if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
+            if centerline_end_block[0] > currentBlockCenter[0]: #if the road continues +x direction
+                if roadBlocks[roadBlocks.index(centerline_end_block) + 1][1] > currentBlockCenter[1]:
+                    next_turn_direction = 1
+                else:
+                    next_turn_direction = -1
+            else: #road continues -x direction
+                if roadBlocks[roadBlocks.index(centerline_end_block) + 1][1] > currentBlockCenter[1]:
+                    next_turn_direction = -1
+                else:
+                    next_turn_direction = 1
+
+        #Case 2: road continues in the z direction -> x stays the same
+        if currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
+            if centerline_end_block[1] > currentBlockCenter[1]: #if the road continues +z direction
+                if roadBlocks[roadBlocks.index(centerline_end_block) + 1][0] > currentBlockCenter[0]:
+                    next_turn_direction = -1
+                else:
+                    next_turn_direction = 1
+            else: #road continues -x direction
+                if roadBlocks[roadBlocks.index(centerline_end_block) + 1][0] > currentBlockCenter[0]:
+                    next_turn_direction = 1
+                else:
+                    next_turn_direction = -1
+                    
+        return next_turn_direction
     
-    #Case 1: road continues in the x direction -> z stays the same
-    if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
-        if centerline_end_block[0] > currentBlockCenter[0]: #if the road continues +x direction
-            if roadBlocks[roadBlocks.index(centerline_end_block) + 1][1] > currentBlockCenter[1]:
-                next_turn_direction = 1
-            else:
-                next_turn_direction = -1
-        else: #road continues -x direction
-            if roadBlocks[roadBlocks.index(centerline_end_block) + 1][1] > currentBlockCenter[1]:
-                next_turn_direction = -1
-            else:
-                next_turn_direction = 1
-
-    #Case 2: road continues in the z direction -> x stays the same
-    if currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
-        if centerline_end_block[1] > currentBlockCenter[1]: #if the road continues +z direction
-            if roadBlocks[roadBlocks.index(centerline_end_block) + 1][0] > currentBlockCenter[0]:
-                next_turn_direction = -1
-            else:
-                next_turn_direction = 1
-        else: #road continues -x direction
-            if roadBlocks[roadBlocks.index(centerline_end_block) + 1][0] > currentBlockCenter[0]:
-                next_turn_direction = 1
-            else:
-                next_turn_direction = -1
-                
-    return next_turn_direction
+    except:
+        return 1 #end finish
 
 def getDistanceToNextTurn(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]

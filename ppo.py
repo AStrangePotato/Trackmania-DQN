@@ -35,8 +35,8 @@ class Memory:
         self.returns = []
 
 class PPO(nn.Module):
-    def __init__(self, input_dim, action_dim, learning_rate=1.5e-4, gamma=0.99, gae_lambda=0.95, 
-                 clip_coef=0.2, ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, 
+    def __init__(self, input_dim, action_dim, learning_rate=3e-4, gamma=0.995, gae_lambda=0.95, 
+                 clip_coef=0.2, ent_coef=0.05, vf_coef=0.5, max_grad_norm=0.5, 
                  update_epochs=4, minibatch_size=256, norm_adv=True, clip_vloss=True):
         super(PPO, self).__init__()
         self.input_dim = input_dim
@@ -59,6 +59,8 @@ class PPO(nn.Module):
             nn.Tanh(),
             nn.Linear(256, 128),
             nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
             nn.Linear(128, action_dim)
         )
         self._init_weights(self.actor, std=0.01)
@@ -68,6 +70,8 @@ class PPO(nn.Module):
             nn.Linear(input_dim, 256),
             nn.Tanh(),
             nn.Linear(256, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
             nn.Tanh(),
             nn.Linear(128, 1)
         )
