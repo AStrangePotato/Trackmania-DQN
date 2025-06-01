@@ -11,7 +11,7 @@ from ppo import PPO, Memory
 
 NUM_BEAMS = 12
 STATE_STACK = 3
-UPDATE_INTERVAL = 2048
+UPDATE_INTERVAL = 4096
 
 class MainClient(Client):
     def __init__(self):
@@ -61,7 +61,7 @@ class MainClient(Client):
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos, self.rb_guess)
 
-            if block is None:
+            if block is None or tmi_state.yaw_pitch_roll[2] > 0.1 or tmi_state.yaw_pitch_roll[1] > 0.1:
                 self.reset_episode(iface, -1)
                 return
 
@@ -84,6 +84,7 @@ class MainClient(Client):
             state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn, next_next_turn, dist_to_next], stacked)), dtype=torch.float32).cuda()
 
             reward = self.get_reward(pos, block)
+            reward += speed
             reward -= 0.01 #timestep penalty
 
             if self.last_state is not None:
