@@ -61,7 +61,7 @@ class MainClient(Client):
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos, self.rb_guess)
 
-            if block is None or tmi_state.yaw_pitch_roll[2] > 0.1 or tmi_state.yaw_pitch_roll[1] > 0.1:
+            if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.1 or abs(tmi_state.yaw_pitch_roll[1]) > 0.1:
                 self.reset_episode(iface, -1)
                 return
 
