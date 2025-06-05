@@ -1,6 +1,6 @@
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackObservations import *
+from archived.trackObservations import *
 import pickle, sys
 import random
 from utils import saveFile

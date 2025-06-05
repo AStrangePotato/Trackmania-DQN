@@ -6,17 +6,17 @@ from collections import deque
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
 from trackObservations import *
-import utils
 from ppo import PPO, Memory
+import utils
 
-NUM_BEAMS = 12
+NUM_BEAMS = 13
 STATE_STACK = 3
 UPDATE_INTERVAL = 4096
 
 class MainClient(Client):
     def __init__(self):
         super().__init__()
-        self.ppo_agent = PPO(input_dim=5 + NUM_BEAMS * STATE_STACK, action_dim=8)
+        self.ppo_agent = PPO(input_dim=5 + NUM_BEAMS * STATE_STACK, action_dim=len(utils.action_space))
         self.memory = Memory()
         with open("states/states.sim", "rb") as f:
             self.states = pickle.load(f)
@@ -34,11 +34,11 @@ class MainClient(Client):
         print(f"Connected to {iface.server_name}")
         new_state = random.choice(self.states)
         iface.rewind_to_state(new_state)
-        self.prevDistance = getClosestCenterlinePoint(new_state.position, getCurrentRoadBlock(new_state.position))
+        self.prevDistance = getClosestCenterlinePoint(new_state.position)
         iface.set_timeout(5000)
 
-    def get_reward(self,position, block):
-        curr = getClosestCenterlinePoint(position, block)
+    def get_reward(self, position):
+        curr = getClosestCenterlinePoint(position)
         reward = curr - self.prevDistance
         self.prevDistance = curr
         return reward
@@ -50,13 +50,19 @@ class MainClient(Client):
         new_state = random.choice(self.states)
         iface.rewind_to_state(new_state)
 
-        self.prevDistance = getClosestCenterlinePoint(new_state.position, getCurrentRoadBlock(new_state.position))
+        self.prevDistance = getClosestCenterlinePoint(new_state.position)
         self.lidar_history.clear()
         self.warming = STATE_STACK
         self.last_state = self.last_action = self.last_logp = self.last_value = None
 
+    def on_checkpoint_count_changed(self, iface: TMInterface, current: int, target: int):
+        if current == 1:
+            iface.prevent_simulation_finish()
+            iface.respawn()
+            self.reset_episode(iface, 5) #terminal reward?
+
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 60 == 0:
+        if _time > 0 and _time % 70 == 0:
             tmi_state = iface.get_simulation_state()
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos, self.rb_guess)
@@ -67,7 +73,7 @@ class MainClient(Client):
 
             self.rb_guess = block
 
-            lidar = np.array(simulate_lidar_raycast(tmi_state, block, NUM_BEAMS)) / 60.0
+            lidar = np.array(simulate_lidar_raycast(tmi_state, block, NUM_BEAMS)) / 80.0
             self.lidar_history.append(lidar)
 
             if self.warming > 0:
@@ -83,26 +89,23 @@ class MainClient(Client):
             next_next_turn = getNextTurnDirection(getCenterlineEndblock(block, retIndex=True))
             state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn, next_next_turn, dist_to_next], stacked)), dtype=torch.float32).cuda()
 
-            reward = self.get_reward(pos, block)
-            reward += speed
+            reward = self.get_reward(pos)
+            reward += speed/10
             reward -= 0.01 #timestep penalty
 
             if self.last_state is not None:
                 self.memory.store(self.last_state, self.last_action, self.last_logp, reward, False, self.last_value)
             
-            #finish race
-            if block >= 918:
-                self.reset_episode(iface, int(self.ppo_agent.get_value(state_tensor).cpu().item()))
-
             if len(self.memory.states) >= UPDATE_INTERVAL:
                 with torch.no_grad():
                     last_value = self.ppo_agent.get_value(state_tensor).item()
                 self.memory.returns = self.ppo_agent.compute_gae(self.memory.rewards, self.memory.dones, self.memory.values, last_value)
                 self.ppo_agent.update(self.memory)
                 print(f"[Update] Total Steps: {self.ppo_agent.global_step}, Avg Reward: {np.mean(self.memory.rewards):.4f}")
-                # Save checkpoint every 10 updates
+
                 if self.ppo_agent.global_step % (UPDATE_INTERVAL * 10) == 0:
                     self.ppo_agent.save_checkpoint()
+
                 self.memory.clear()
 
             with torch.no_grad():
@@ -112,7 +115,7 @@ class MainClient(Client):
             self.last_action = action
             self.last_logp = logp
             self.last_value = value
-            utils.play_action(iface, action.item())
+            iface.set_input_state(**utils.action_space[action.item()])
 
 def main():
     server = f"TMInterface{sys.argv[1]}" if len(sys.argv) > 1 else "TMInterface0"

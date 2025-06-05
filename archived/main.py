@@ -1,6 +1,6 @@
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackObservations import *
+from archived.trackObservations import *
 import sys, random, pickle
 import numpy as np
 from multiprocessing import shared_memory

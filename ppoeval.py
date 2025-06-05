@@ -9,7 +9,7 @@ import atexit
 from ppo import PPO
 from tminterface.interface import TMInterface
 from tminterface.client import Client, run_client
-from trackObservations import *
+from archived.trackObservations import *
 import utils
 
 NUM_BEAMS = 12

@@ -1,14 +1,36 @@
 import math
 from utils import *
 
+
+
+def getAgentInputs(state, currentRoadBlockIndex):
+    a = state.display_speed
+    c = state.scene_mobil.turning_rate
+    d = getDistanceToCenterLine(state, currentRoadBlockIndex)
+    e = getAngleToCenterline(state, currentRoadBlockIndex)
+    f = getDistanceToNextTurn(state, currentRoadBlockIndex)
+    g = getNextTurnDirection(currentRoadBlockIndex)
+    
+    # Normalize features
+    a /= 130      # speed normalized
+    d /= 8       # distance to centerline normalized
+    e /= 3.14    # angle to centerline normalized (-1 to 1)
+    f /= 100     # distance to next turn normalized
+    
+    return [a, c, d, e, f, g]
+
+import math
+
 def simulate_lidar_raycast(state,
                            currentRoadBlockIndex,
-                           max_range=80.0,
-                           step=0.15):
+                           num_beams=12,
+                           max_range=60.0,
+                           step=0.2):
     px, _, pz = state.position
     yaw = state.yaw_pitch_roll[0] % (2 * math.pi)
 
-    beam_angles_deg = [-60.0, -40.0, -20.0, -12.0, -7.0, -4.0, 0.0, 4.0,  7.0,  12.0, 20.0, 40.0, 60.0]
+    beam_angles_deg = [-60.0, -40.0, -20.0, -10.0, -5.0, -2.0,
+                        2.0,  5.0,  10.0, 20.0, 40.0, 60.0]
     directions = [
         (math.sin(yaw + math.radians(a)), math.cos(yaw + math.radians(a)))
         for a in beam_angles_deg
@@ -80,6 +102,56 @@ def getCenterlineEndblock(currentRoadBlockIndex, retIndex=False):
         return nextCorner
     return centerline_end_block
 
+def getLateralVelocity(state, turning_rate):
+    pi = 3.14159
+    if turning_rate > 0: #right
+        angle = state.yaw_pitch_roll[0] + pi/2
+    elif turning_rate < 0:
+        angle = state.yaw_pitch_roll[0] - pi/2
+    else:
+        return 0
+    
+    
+    lateral_unit_vector = [math.cos(angle), math.sin(angle)]
+    mag = (lateral_unit_vector[0]**2 + lateral_unit_vector[1]**2)**0.5
+    lateral_unit_vector[0] /= mag
+    lateral_unit_vector[1] /= mag
+
+    velocity_vector = [state.velocity[0], state.velocity[2]]
+
+    projection = lateral_unit_vector[0] * velocity_vector[0] + lateral_unit_vector[1] * velocity_vector[1]
+    
+    return abs(projection) #lateral velocity
+    
+def getAngleToCenterline(state, currentRoadBlockIndex):
+    currentBlockCenter = roadBlocks[currentRoadBlockIndex]
+
+    centerline_end_block = getCenterlineEndblock(currentRoadBlockIndex)
+    
+    pi = 3.141592
+    
+    yaw = state.yaw_pitch_roll[0]
+
+    #Case 1: road continues in the x direction -> z stays the same
+    if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
+        if centerline_end_block[0] > currentBlockCenter[0]: #if the road continues +x direction
+            angle_to_centerline = yaw - 1.571
+        else: #road continues -x direction
+            angle_to_centerline = yaw + 1.571
+
+    #Case 2: road continues in the z direction -> x stays the same
+    if currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
+        if centerline_end_block[1] > currentBlockCenter[1]: #if the road continues +z direction
+            angle_to_centerline = yaw
+        else: #road continues -z direction
+            angle_to_centerline = yaw + pi
+
+    angle_to_centerline = (angle_to_centerline + 2*pi) % (2 * pi) #making all positive
+    if angle_to_centerline < pi:
+        return angle_to_centerline
+    else:
+        return angle_to_centerline - 2*pi
+
 def getNextTurnDirection(currentRoadBlockIndex):
     try:
         currentBlockCenter = roadBlocks[currentRoadBlockIndex]
@@ -138,13 +210,29 @@ def getDistanceToNextTurn(state, currentRoadBlockIndex):
 
     return dist_to_next_turn
 
+def getDistanceToCenterLine(state, currentRoadBlockIndex):
+    if currentRoadBlockIndex not in cornerBlockIndices:
+        currentBlockCenter = roadBlocks[currentRoadBlockIndex]
+
+        #Case 1: road continues in the x direction -> z stays the same
+        if currentBlockCenter[1] == roadBlocks[currentRoadBlockIndex + 1][1]:
+            dist_to_centerline = abs(currentBlockCenter[1] - state.position[2])
+
+        #Case 2: road continues in the z direction -> x stays the same
+        elif currentBlockCenter[0] == roadBlocks[currentRoadBlockIndex + 1][0]:
+            dist_to_centerline = abs(currentBlockCenter[0] - state.position[0])
+
+    else: #on a corner
+        dist_to_centerline = getClosestCenterlinePoint(state.position, currentRoadBlockIndex, True)
+
+    return dist_to_centerline
 
 def dist(point1, point2):
     x1, y1 = point1
     x2, y2 = point2
     return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
-def getClosestCenterlinePoint(position, return_dist=False):
+def getClosestCenterlinePoint(position, roadBlockIndex, return_dist=False):
     px, _, pz = position
     pos2d = (px, pz)
 

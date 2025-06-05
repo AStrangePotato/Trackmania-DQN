@@ -25,8 +25,8 @@ os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (10, 50)
 pygame.font.init()
 my_font = pygame.font.SysFont('Comic Sans MS', 10)
 
-scale = 0.75
-rect_size = 8
+scale = 0.9
+rect_size = 10
 offset = 220
 screen = pygame.display.set_mode((1000, 1000))
 running = True

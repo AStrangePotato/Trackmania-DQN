@@ -11,11 +11,10 @@ SCALE = 600  # pixels per meter
 # === Connect to shared memory ===
 shm = shared_memory.SharedMemory(name='tmdata')
 # Infer num_beams by dividing shm size by 8 bytes per float64
-num_beams = 12
+num_beams = 13
 data = np.ndarray((num_beams,), dtype=np.float64, buffer=shm.buf)
 
-beam_angles_deg = [-60.0, -40.0, -20.0, -10.0, -5.0, -2.0,
-                        2.0,  5.0,  10.0, 20.0, 40.0, 60.0]
+beam_angles_deg = [-60.0, -40.0, -20.0, -12.0, -7.0, -4.0, 0.0, 4.0,  7.0,  12.0, 20.0, 40.0, 60.0]
 
 print(num_beams)
 # === Pygame setup ===
