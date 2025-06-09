@@ -36,8 +36,8 @@ class Memory:
 
 class PPO(nn.Module):
     def __init__(self, input_dim, action_dim, learning_rate=2.5e-4, gamma=0.99, gae_lambda=0.95, 
-                 clip_coef=0.2, ent_coef=0.03, vf_coef=0.5, max_grad_norm=0.5, 
-                 update_epochs=4, minibatch_size=256, norm_adv=True, clip_vloss=True):
+                 clip_coef=0.2, ent_coef=0.05, vf_coef=0.5, max_grad_norm=0.5, 
+                 update_epochs=10, minibatch_size=512, norm_adv=True, clip_vloss=True):
         super(PPO, self).__init__()
         self.input_dim = input_dim
         self.action_dim = action_dim
@@ -55,20 +55,20 @@ class PPO(nn.Module):
 
         # Actor
         self.actor = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(128, action_dim)
+            nn.Linear(256, action_dim)
         )
 
         # Critic
         self.critic = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(256, 1)
         )
 
 

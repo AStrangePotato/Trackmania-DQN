@@ -1,0 +1,24 @@
+#failed, stuck in local and high loss
+#stack = 3
+# def __init__(self, input_dim, action_dim, learning_rate=2.5e-4, gamma=0.995, gae_lambda=0.95, 
+#                  clip_coef=0.2, ent_coef=0.03, vf_coef=0.5, max_grad_norm=0.5, 
+#                  update_epochs=4, minibatch_size=256, norm_adv=True, clip_vloss=True):
+#             reward = self.get_reward(pos) * 10
+#             reward += speed/10
+# terminal -50 
+#2.4m steps   (6.8hr)
+# 128 128
+
+
+#0 terminal for finish
+#epoch to 10
+#4096
+#no dist to next discontinuity
+#128 128
+#reward = self.get_reward(pos) * 5, -10 terminal
+
+
+
+#10 terminal finish
+#10 epoch, no dist to next, reward speed + cp passed, +- 10 terminals
+#128 128, 4096

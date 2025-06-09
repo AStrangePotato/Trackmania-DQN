@@ -3,7 +3,7 @@ from utils import *
 
 def simulate_lidar_raycast(state,
                            currentRoadBlockIndex,
-                           max_range=80.0,
+                           max_range=60.0,
                            step=0.15):
     px, _, pz = state.position
     yaw = state.yaw_pitch_roll[0] % (2 * math.pi)
@@ -114,7 +114,7 @@ def getNextTurnDirection(currentRoadBlockIndex):
         return next_turn_direction
     
     except:
-        return 1 #end finish
+        return 0 #end finish neutral turn
 
 def getDistanceToNextTurn(state, currentRoadBlockIndex):
     currentBlockCenter = roadBlocks[currentRoadBlockIndex]
