@@ -11,7 +11,7 @@ import utils
 
 NUM_BEAMS = 13
 STATE_STACK = 3
-UPDATE_INTERVAL = 8196
+UPDATE_INTERVAL = 8192
 
 class MainClient(Client):
     def __init__(self):
@@ -37,7 +37,7 @@ class MainClient(Client):
         new_state = random.choice(self.states)
         iface.rewind_to_state(new_state)
         self.prevDistance = getClosestCenterlinePoint(new_state.position)
-        iface.set_timeout(5000)
+        iface.set_timeout(15000)
 
     def get_reward(self, position):
         curr = getClosestCenterlinePoint(position)
@@ -64,14 +64,14 @@ class MainClient(Client):
             
             
     def on_run_step(self, iface: TMInterface, _time: int):
-        if _time > 0 and _time % 70 == 0:
+        if _time > 0 and _time % 50 == 0:
             tmi_state = iface.get_simulation_state()
             pos = tmi_state.position
             block = getCurrentRoadBlock(pos, self.rb_guess)
 
             if self.finished:
                 self.finished = False
-                self.reset_episode(iface, 10) #terminal reward?
+                self.reset_episode(iface, 100) #terminal reward?
 
             if block is None or abs(tmi_state.yaw_pitch_roll[2]) > 0.1 or abs(tmi_state.yaw_pitch_roll[1]) > 0.1:
                 self.reset_episode(iface, -10)
@@ -92,7 +92,7 @@ class MainClient(Client):
             turning_rate = tmi_state.scene_mobil.turning_rate
             next_turn = getNextTurnDirection(block)
             next_next_turn = getNextTurnDirection(getCenterlineEndblock(block, retIndex=True))
-            dist_to_next = getDistanceToNextTurn(tmi_state, block)
+            dist_to_next = (getDistanceToNextTurn(tmi_state, block) - 8) / 160 - 1
             state_tensor = torch.tensor(np.concatenate(([speed, turning_rate, next_turn, next_next_turn, dist_to_next], stacked)), dtype=torch.float32).cuda()
 
             reward = self.get_reward(pos)
@@ -108,7 +108,7 @@ class MainClient(Client):
                 self.ppo_agent.update(self.memory)
                 print(f"[Update] Total Steps: {self.ppo_agent.global_step}, Avg Reward: {np.mean(self.memory.rewards):.4f}")
 
-                if self.ppo_agent.global_step % (UPDATE_INTERVAL * 10) == 0:
+                if self.ppo_agent.global_step % (UPDATE_INTERVAL * 10) == 0 or random.randint(0, 10) == 0:
                     self.ppo_agent.save_checkpoint()
 
                 self.memory.clear()

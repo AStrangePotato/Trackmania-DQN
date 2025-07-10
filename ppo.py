@@ -35,9 +35,9 @@ class Memory:
         self.returns = []
 
 class PPO(nn.Module):
-    def __init__(self, input_dim, action_dim, learning_rate=2.5e-4, gamma=0.99, gae_lambda=0.95, 
-                 clip_coef=0.2, ent_coef=0.05, vf_coef=0.5, max_grad_norm=0.5, 
-                 update_epochs=10, minibatch_size=512, norm_adv=True, clip_vloss=True):
+    def __init__(self, input_dim, action_dim, learning_rate=5e-5, gamma=0.99, gae_lambda=0.95, 
+                 clip_coef=0.2, ent_coef=0.005, vf_coef=0.5, max_grad_norm=0.5, 
+                 update_epochs=8, minibatch_size=512, norm_adv=True, clip_vloss=True):
         super(PPO, self).__init__()
         self.input_dim = input_dim
         self.action_dim = action_dim
@@ -210,7 +210,7 @@ class PPO(nn.Module):
 
             # Early stopping on KL divergence
             if approx_kl > 0.02:  # Reasonable default for target_kl
-                print("KL LOSS EXCEEDED")
+                print("KL LOSS EXCEEDED on EPOCH: ", epoch)
                 break
 
         # Logging
